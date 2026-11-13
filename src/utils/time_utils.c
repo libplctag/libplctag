@@ -31,12 +31,60 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+/*
+ * Monotonic time.
+ *
+ * Linux uses CLOCK_BOOTTIME because CLOCK_MONOTONIC stops while suspended there.  macOS
+ * CLOCK_MONOTONIC already counts sleep.  CLOCK_BOOTTIME is used on Linux only: other systems that
+ * define it may give it other meanings.  The BSDs use CLOCK_MONOTONIC, not yet checked across a
+ * suspend.  Windows uses the performance counter, not GetTickCount64(): that one moves in 10-16ms
+ * steps, and deadlines are as close as 1ms.  The counter includes suspended time.
+ */
 
 #include <stdint.h>
-#include <libplctag/lib/tag.h>
-#include <utils/attr.h>
+#include <utils/time_utils.h>
 
-extern plc_tag_p omron_device_tag_create(attr attribs,
-                                         void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                         void *userdata, plc_tag_p src_tag);
+#if defined(_WIN32)
+#    include <windows.h>
+
+static int64_t perf_counter_scaled(int64_t units_per_sec) {
+    LARGE_INTEGER count;
+    LARGE_INTEGER freq;
+
+    QueryPerformanceCounter(&count);
+    QueryPerformanceFrequency(&freq);
+
+    /* split so the multiply cannot overflow. */
+    return (count.QuadPart / freq.QuadPart) * units_per_sec + ((count.QuadPart % freq.QuadPart) * units_per_sec) / freq.QuadPart;
+}
+
+int64_t time_ms(void) { return perf_counter_scaled(1000); }
+
+int64_t time_us(void) { return perf_counter_scaled(1000000); }
+
+#else
+#    include <time.h>
+
+#    if defined(__linux__) && defined(CLOCK_BOOTTIME)
+#        define TIME_UTILS_CLOCK CLOCK_BOOTTIME
+#    else
+#        define TIME_UTILS_CLOCK CLOCK_MONOTONIC
+#    endif
+
+int64_t time_ms(void) {
+    struct timespec ts;
+
+    clock_gettime(TIME_UTILS_CLOCK, &ts);
+
+    return ((int64_t)ts.tv_sec * 1000) + ((int64_t)ts.tv_nsec / 1000000);
+}
+
+int64_t time_us(void) {
+    struct timespec ts;
+
+    clock_gettime(TIME_UTILS_CLOCK, &ts);
+
+    return ((int64_t)ts.tv_sec * 1000000) + ((int64_t)ts.tv_nsec / 1000);
+}
+
+#endif

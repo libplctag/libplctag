@@ -820,13 +820,13 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
         ab_request_p req = NULL;
 
         if(tag->req) {
-            critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+            critical_block(&tag->api_mutex) { req = rc_inc(tag->req); }
         }
 
         if(req) {
             spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
 
-            critical_block(tag->api_mutex) {
+            critical_block(&tag->api_mutex) {
                 if(tag->req == req) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id,
                            "rc_dec: Releasing tag-owned reference to request of tag %" PRId32 ".", tag->tag_id);
@@ -885,7 +885,7 @@ int ab_tag_abort(ab_tag_p tag) {
     if(tag) {
         ab_request_p req = NULL;
 
-        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+        critical_block(&tag->api_mutex) { req = rc_inc(tag->req); }
 
         if(req) {
             spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
@@ -969,14 +969,12 @@ void ab_tag_destroy(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "No session pointer!");
     }
 
-    if(tag->ext_mutex) {
+    if(tag->ext_mutex.initialized) {
         mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
     }
 
-    if(tag->api_mutex) {
+    if(tag->api_mutex.initialized) {
         mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
     }
 
     if(tag->tag_cond_wait) {
@@ -1609,7 +1607,7 @@ int check_request_status(ab_tag_p tag) {
 
         /* make sure the request cannot be pulled out from underneath us. */
         if(tag->req) {
-            critical_block(tag->api_mutex) { request = rc_inc(tag->req); }
+            critical_block(&tag->api_mutex) { request = rc_inc(tag->req); }
         }
 
         /* it was already gone. */

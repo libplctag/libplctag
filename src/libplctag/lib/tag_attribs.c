@@ -492,6 +492,9 @@ int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer
 
 
 static int32_t core_get_str_is_counted(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_is_counted;
 
     return PLCTAG_STATUS_OK;
@@ -499,6 +502,9 @@ static int32_t core_get_str_is_counted(plc_tag_p tag, int32_t *result) {
 
 
 static int32_t core_get_str_is_fixed_length(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_is_fixed_length;
 
     return PLCTAG_STATUS_OK;
@@ -506,6 +512,9 @@ static int32_t core_get_str_is_fixed_length(plc_tag_p tag, int32_t *result) {
 
 
 static int32_t core_get_str_is_zero_terminated(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_is_zero_terminated;
 
     return PLCTAG_STATUS_OK;
@@ -513,6 +522,9 @@ static int32_t core_get_str_is_zero_terminated(plc_tag_p tag, int32_t *result) {
 
 
 static int32_t core_get_str_is_byte_swapped(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_is_byte_swapped;
 
     return PLCTAG_STATUS_OK;
@@ -520,6 +532,9 @@ static int32_t core_get_str_is_byte_swapped(plc_tag_p tag, int32_t *result) {
 
 
 static int32_t core_get_str_count_word_bytes(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_count_word_bytes;
 
     return PLCTAG_STATUS_OK;
@@ -527,6 +542,9 @@ static int32_t core_get_str_count_word_bytes(plc_tag_p tag, int32_t *result) {
 
 
 static int32_t core_get_str_max_capacity(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_max_capacity;
 
     return PLCTAG_STATUS_OK;
@@ -534,6 +552,9 @@ static int32_t core_get_str_max_capacity(plc_tag_p tag, int32_t *result) {
 
 
 static int32_t core_get_str_total_length(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_total_length;
 
     return PLCTAG_STATUS_OK;
@@ -541,6 +562,9 @@ static int32_t core_get_str_total_length(plc_tag_p tag, int32_t *result) {
 
 
 static int32_t core_get_str_pad_bytes(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_pad_bytes;
 
     return PLCTAG_STATUS_OK;
@@ -548,6 +572,9 @@ static int32_t core_get_str_pad_bytes(plc_tag_p tag, int32_t *result) {
 
 
 static int32_t core_get_str_pad_to_multiple_bytes(plc_tag_p tag, int32_t *result) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     *result = (int32_t)tag->byte_order->str_pad_to_multiple_bytes;
 
     return PLCTAG_STATUS_OK;
@@ -555,50 +582,80 @@ static int32_t core_get_str_pad_to_multiple_bytes(plc_tag_p tag, int32_t *result
 
 
 static int32_t core_get_int16_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_copy_byte_order(&tag->byte_order->int16_order[0], 2, buffer, buffer_length);
 }
 
 
 static int32_t core_get_int16_byte_order_size(plc_tag_p tag) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_byte_order_size(&tag->byte_order->int16_order[0], 2);
 }
 
 
 static int32_t core_get_int32_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_copy_byte_order(&tag->byte_order->int32_order[0], 4, buffer, buffer_length);
 }
 
 
 static int32_t core_get_int32_byte_order_size(plc_tag_p tag) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_byte_order_size(&tag->byte_order->int32_order[0], 4);
 }
 
 
 static int32_t core_get_int64_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_copy_byte_order(&tag->byte_order->int64_order[0], 8, buffer, buffer_length);
 }
 
 
 static int32_t core_get_int64_byte_order_size(plc_tag_p tag) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_byte_order_size(&tag->byte_order->int64_order[0], 8);
 }
 
 
 static int32_t core_get_float32_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_copy_byte_order(&tag->byte_order->float32_order[0], 4, buffer, buffer_length);
 }
 
 
 static int32_t core_get_float32_byte_order_size(plc_tag_p tag) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_byte_order_size(&tag->byte_order->float32_order[0], 4);
 }
 
 
 static int32_t core_get_float64_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_copy_byte_order(&tag->byte_order->float64_order[0], 8, buffer, buffer_length);
 }
 
 
 static int32_t core_get_float64_byte_order_size(plc_tag_p tag) {
+    /* tags with no data, such as connection tags, have no byte order. */
+    if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
+
     return attr_byte_order_size(&tag->byte_order->float64_order[0], 8);
 }

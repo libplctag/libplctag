@@ -154,7 +154,7 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
          * session->session_mutex so we get a real, consistent point-in-time state
          * rather than a read_idx from before a transition paired with a status from
          * after it -- see the comment in session_set_connection_status(). */
-        critical_block(tag->session->session_mutex) {
+        critical_block(&tag->session->session_mutex) {
             tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
             tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
         }
@@ -205,10 +205,6 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
      * Wait until the CREATED event has been dispatched before firing any connection state events.
      * The generic tickler calls vtable->tickler before plc_tag_generic_handle_event_callbacks,
      * so draining the ring buffer here would dispatch CONNECTING before CREATED.
-     *
-     * FIXME:
-     * This event system is getting far too complicated and should be refactored.
-     * Maybe using a ring buffer as we do for the session connection status?
      */
     if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
 
@@ -219,60 +215,24 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
      * synthesise the creation-time state so the tag is not silently stuck. */
     if(conn_tag->first_tickler_run) {
         conn_tag->first_tickler_run = false;
-        if(conn_tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN && conn_tag->callback) {
-            conn_tag->callback(conn_tag->tag_id, conn_tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK,
-                               conn_tag->userdata);
+        if(conn_tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN) {
+            tag_event_push(raw_tag, conn_tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
         }
     }
 
-    /* drain all unread ring buffer entries; write_idx points to the last written slot */
+    /* a full event queue leaves the rest for the next pass. */
     while(read_idx != write_idx) {
-        read_idx = (read_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
-        int32_t event_type = conn_tag->session->conn_status_ring[read_idx].event_type;
-        int32_t status = conn_tag->session->conn_status_ring[read_idx].status;
-        // int32_t reason = conn_tag->session->conn_status_ring[read_idx].reason;
+        int32_t next_idx = (read_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
+        int32_t event_type = conn_tag->session->conn_status_ring[next_idx].event_type;
 
-        /* api_mutex is already held by the generic tickler so dispatch each entry directly */
-        if(conn_tag->callback) {
-            switch(event_type) {
-                case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
-                    if(conn_tag->io_events) {
-                        conn_tag->callback(conn_tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, (int)status, conn_tag->userdata);
-                    }
-                    break;
+        if(!tag_push_conn_event(raw_tag, event_type, conn_tag->session->conn_status_ring[next_idx].status, conn_tag->io_events)) { break; }
 
-                case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED:
-                    if(conn_tag->io_events) {
-                        conn_tag->callback(conn_tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, (int)status, conn_tag->userdata);
-                    }
-                    break;
+        if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) { conn_tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET; }
 
-                case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED:
-                    if(conn_tag->io_events) {
-                        conn_tag->callback(conn_tag->tag_id, PLCTAG_EVENT_READ_STARTED, (int)status, conn_tag->userdata);
-                    }
-                    break;
-
-                case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED:
-                    if(conn_tag->io_events) {
-                        conn_tag->callback(conn_tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, (int)status, conn_tag->userdata);
-                    }
-                    break;
-
-                default:
-                    if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) {
-                        conn_tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET;
-                        conn_tag->callback(conn_tag->tag_id, event_type, PLCTAG_STATUS_OK, conn_tag->userdata);
-                    } else {
-                        pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_WARN, conn_tag->tag_id, "Unsupported ring event type %d.",
-                               (int)event_type);
-                    }
-                    break;
-            }
-        }
+        read_idx = next_idx;
     }
 
-    conn_tag->status_ring_read_idx = write_idx;
+    conn_tag->status_ring_read_idx = read_idx;
 
     return PLCTAG_STATUS_OK;
 }
@@ -298,14 +258,12 @@ static void ab_connection_tag_destructor(void *ptr) {
         pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_WARN, tag->tag_id, "No session pointer!");
     }
 
-    if(tag->ext_mutex) {
+    if(tag->ext_mutex.initialized) {
         mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
     }
 
-    if(tag->api_mutex) {
+    if(tag->api_mutex.initialized) {
         mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
     }
 
     if(tag->tag_cond_wait) {

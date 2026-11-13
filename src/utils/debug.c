@@ -44,6 +44,7 @@
 #include <time.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
+#include <utils/time_utils.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #    include <windows.h>

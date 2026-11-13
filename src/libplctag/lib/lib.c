@@ -55,6 +55,7 @@
 #include <utils/random_utils.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
+#include <utils/time_utils.h>
 
 
 #define INITIAL_TAG_TABLE_SIZE (201)
@@ -78,7 +79,7 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
  * (tag->instance holds one per tag). */
 struct lib_instance_t {
     hashtable_p tags;
-    mutex_p tag_lookup_mutex;
+    mutex_t tag_lookup_mutex;
     cond_p tag_tickler_wait;
     thread_p tag_tickler_thread;
 };
@@ -202,7 +203,7 @@ static void lib_instance_destructor(void *arg) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag tickler condition var destroyed.");
     }
 
-    if(inst->tag_lookup_mutex) {
+    if(inst->tag_lookup_mutex.initialized) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "About to destroy tag lookup mutex.");
         mutex_destroy(&inst->tag_lookup_mutex);
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag lookup mutex destroyed.");
@@ -298,7 +299,7 @@ int lib_init(void) {
     }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag hashtable mutex.");
-    rc = mutex_create(&(inst->tag_lookup_mutex));
+    rc = mutex_init(&(inst->tag_lookup_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag hashtable mutex!");
         rc_dec(inst);
@@ -415,6 +416,8 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
             if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
 
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Aborting ongoing operation if any!");
+
+            if(tag->read_in_flight || tag->write_in_flight) { tag->status = PLCTAG_ERR_ABORT; }
 
             tag->read_complete = 0;
             tag->read_in_flight = 0;
@@ -537,83 +540,90 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
 }
 
 
+bool tag_event_push(plc_tag_p tag, int event, int status) {
+    /* do not stack up events if there is no callback. */
+    if(!tag->callback) { return true; }
+
+    /* the last slot is kept for DESTROYED, which releases the callback. */
+    if(tag->event_count >= ((event == PLCTAG_EVENT_DESTROYED) ? TAG_EVENT_RING_SIZE : TAG_EVENT_RING_SIZE - 1)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, tag->tag_id, "Event ring full, dropping event %d with status %s!", event,
+               plc_tag_decode_error(status));
+        return false;
+    }
+
+    tag->events[(tag->event_head + tag->event_count) & TAG_EVENT_RING_MASK] =
+        (tag_event_t){.event = (uint8_t)event, .status = (int8_t)status};
+    tag->event_count++;
+
+    return true;
+}
+
+
+bool tag_push_conn_event(plc_tag_p tag, int32_t event_type, int32_t status, bool io_events) {
+    int event = 0;
+
+    switch(event_type) {
+        case TAG_CONN_EVENT_SEND_REQUEST_STARTED: event = PLCTAG_EVENT_WRITE_STARTED; break;
+        case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED: event = PLCTAG_EVENT_WRITE_COMPLETED; break;
+        case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED: event = PLCTAG_EVENT_READ_STARTED; break;
+        case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED: event = PLCTAG_EVENT_READ_COMPLETED; break;
+        default:
+            if(event_type < PLCTAG_EVENT_CONN_STATUS_OFFSET) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unsupported connection event type %d.", (int)event_type);
+                return true;
+            }
+            return tag_event_push(tag, (int)event_type, PLCTAG_STATUS_OK);
+    }
+
+    if(!io_events) { return true; }
+
+    return tag_event_push(tag, event, (int)status);
+}
+
+
+/* Run the callback for each queued event, oldest first. */
 void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
-    /* punt if not needed. */
     if(!tag) { return; }
 
-    critical_block(tag->api_mutex) {
-        /* Check the callback under the API mutex, not before: plc_tag_destroy() clears
-         * the callback (and userdata) under this same mutex while tearing the tag down.
-         * The tag tickler thread holds its own reference and can call this function
-         * after plc_tag_destroy() has returned, so an unsynchronized pre-check here would
-         * race that clear -- benign in practice since this check alone re-runs properly
-         * guarded below, but still a real data race by the C11/TSan memory model. */
-        if(!tag->callback) { break; }
+    critical_block(&tag->api_mutex) {
+        /*
+         * Under the API mutex, not before: plc_tag_destroy() clears the callback under this same
+         * mutex, and a handler thread holding its own reference can get here after that.
+         * A callback may queue more events, or unregister itself; the loop sees both.
+         */
+        /* called from a callback: the outer loop delivers these after it returns. */
+        if(tag->dispatching) { break; }
 
-        /* trigger this if there is any other event. Only once. */
-        if(tag->event_creation_complete) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag creation complete with status %s.",
-                   plc_tag_decode_error(tag->event_creation_complete_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
-            tag->event_creation_complete = 0;
-            tag->event_creation_complete_status = PLCTAG_STATUS_OK;
+        tag->dispatching = true;
+
+        while(tag->event_count > 0) {
+            tag_event_t event = tag->events[tag->event_head];
+
+            if(!tag->callback) {
+                tag->event_count = 0;
+                break;
+            }
+
+            tag->event_head = (uint8_t)((tag->event_head + 1) & TAG_EVENT_RING_MASK);
+            tag->event_count--;
+
+            if(event.event == PLCTAG_EVENT_CREATED) { tag->event_creation_complete = 0; }
+
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Dispatching event %d with status %s.", (int)event.event,
+                   plc_tag_decode_error(event.status));
+
+            tag->callback(tag->tag_id, (int)event.event, (int)event.status, tag->userdata);
+
+            /* DESTROYED is last; userdata may already be freed. */
+            if(event.event == PLCTAG_EVENT_DESTROYED) {
+                tag->callback = NULL;
+                tag->userdata = NULL;
+                tag->event_count = 0;
+            }
         }
 
-        /* was there a read start? */
-        if(tag->event_read_started) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag read started with status %s.",
-                   plc_tag_decode_error(tag->event_read_started_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, tag->event_read_started_status, tag->userdata);
-            tag->event_read_started = 0;
-            tag->event_read_started_status = PLCTAG_STATUS_OK;
-        }
-
-        /* was there a write start? */
-        if(tag->event_write_started) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag write started with status %s.",
-                   plc_tag_decode_error(tag->event_write_started_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, tag->event_write_started_status, tag->userdata);
-            tag->event_write_started = 0;
-            tag->event_write_started_status = PLCTAG_STATUS_OK;
-        }
-
-        /* was there an abort? */
-        if(tag->event_operation_aborted) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag operation aborted with status %s.",
-                   plc_tag_decode_error(tag->event_operation_aborted_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, tag->event_operation_aborted_status, tag->userdata);
-            tag->event_operation_aborted = 0;
-            tag->event_operation_aborted_status = PLCTAG_STATUS_OK;
-        }
-
-        /* was there a read completion? */
-        if(tag->event_read_complete) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag read completed with status %s.",
-                   plc_tag_decode_error(tag->event_read_complete_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, tag->event_read_complete_status, tag->userdata);
-            tag->event_read_complete = 0;
-            tag->event_read_complete_status = PLCTAG_STATUS_OK;
-        }
-
-        /* was there a write completion? */
-        if(tag->event_write_complete) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag write completed with status %s.",
-                   plc_tag_decode_error(tag->event_write_complete_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, tag->event_write_complete_status, tag->userdata);
-            tag->event_write_complete = 0;
-            tag->event_write_complete_status = PLCTAG_STATUS_OK;
-        }
-
-        /* do this last so that we raise all other events first. we only start deletion events. */
-        if(tag->event_deletion_started) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag deletion started with status %s.",
-                   plc_tag_decode_error(tag->event_creation_complete_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_DESTROYED, tag->event_deletion_started_status, tag->userdata);
-            tag->event_deletion_started = 0;
-            tag->event_deletion_started_status = PLCTAG_STATUS_OK;
-        }
-
-    } /* end of API mutex critical area. */
+        tag->dispatching = false;
+    }
 }
 
 
@@ -631,13 +641,13 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    rc = mutex_create(&(tag->ext_mutex));
+    rc = mutex_init(&(tag->ext_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag external mutex!");
         return PLCTAG_ERR_CREATE;
     }
 
-    rc = mutex_create(&(tag->api_mutex));
+    rc = mutex_init(&(tag->api_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag API mutex!");
         return PLCTAG_ERR_CREATE;
@@ -684,7 +694,7 @@ THREAD_FUNC(tag_tickler_func) {
         /* what is the maximum time we will wait until */
         tag_tickler_wait_timeout_end = time_ms() + timeout_wait_ms;
 
-        critical_block(inst->tag_lookup_mutex) {
+        critical_block(&inst->tag_lookup_mutex) {
             max_index = hashtable_capacity(inst->tags);
 
             for(int i = 0; i < max_index; i++) {
@@ -704,7 +714,7 @@ THREAD_FUNC(tag_tickler_func) {
             plc_tag_p tag = vector_get(active_tags, tag_index);
 
             /* try to hold the tag API mutex while all this goes on. */
-            if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+            if(mutex_try_lock(&tag->api_mutex) == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "calling generic tag tickler.");
 
                 plc_tag_generic_tickler(tag);
@@ -752,7 +762,7 @@ THREAD_FUNC(tag_tickler_func) {
                 }
 
                 /* we are done with the tag API mutex now. */
-                mutex_unlock(tag->api_mutex);
+                mutex_unlock(&tag->api_mutex);
 
                 /* call callbacks */
                 plc_tag_generic_handle_event_callbacks(tag);
@@ -814,13 +824,17 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
      * this blocks until we get the mutex by which time any
      * long running operation is done.
      */
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         tag->read_cache_expire = (uint64_t)0;
+        tag->abort_count++;
 
         /* Is the abort flag still set? This may be synchronous. */
         if(atomic_get_bool(&tag->abort_requested)) {
             /* Clear the abort flag so the tickler won't process it again */
             atomic_set_bool(&tag->abort_requested, false);
+
+            /* the read start left the status PENDING, and no protocol abort resets it. */
+            if(tag->read_in_flight || tag->write_in_flight) { tag->status = PLCTAG_ERR_ABORT; }
 
             /*
              * Operation-aware cleanup of in-flight flags.
@@ -886,7 +900,7 @@ static int plc_tag_status_impl(plc_tag_p tag) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
 
         /* If the vtable tickler just completed a read or write, finalize it
@@ -1308,7 +1322,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      * mb_activate/mb_read_start) race the handler thread's tickle_tag(), which changes
      * tag->op under api_mutex + plc->mutex (see modbus.c tickle_all_tags). */
     if(tag->vtable && tag->vtable->activate) {
-        critical_block(tag->api_mutex) { tag->vtable->activate(tag); }
+        critical_block(&tag->api_mutex) { tag->vtable->activate(tag); }
     }
 
     /* wake up tag's PLC here. */
@@ -1316,18 +1330,18 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     /* get the tag status. */
     if(tag->vtable && tag->vtable->status) {
-        critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
+        critical_block(&tag->api_mutex) { rc = tag->vtable->status(tag); }
     }
 
     /* check to see if there was an error during tag creation. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
         if(tag->vtable && tag->vtable->abort) {
-            critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+            critical_block(&tag->api_mutex) { tag->vtable->abort(tag); }
         }
 
         /* remove the tag from the hashtable. */
-        critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+        critical_block(&tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
 
         rc_dec(tag);
         return rc;
@@ -1367,11 +1381,11 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while waiting for tag creation to complete!",
                        plc_tag_decode_error(rc));
                 if(tag->vtable && tag->vtable->abort) {
-                    critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+                    critical_block(&tag->api_mutex) { tag->vtable->abort(tag); }
                 }
 
                 /* remove the tag from the hashtable. */
-                critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+                critical_block(&tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
 
                 rc_dec(tag);
                 return rc;
@@ -1379,7 +1393,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
             /* get the tag status. */
             if(tag->vtable && tag->vtable->status) {
-                critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
+                critical_block(&tag->api_mutex) { rc = tag->vtable->status(tag); }
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag does not have a status function!");
             }
@@ -1394,18 +1408,18 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
             /* the vtable abort() expects the caller to hold api_mutex, and takes plc->mutex itself. */
             if(tag->vtable && tag->vtable->abort) {
-                critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+                critical_block(&tag->api_mutex) { tag->vtable->abort(tag); }
             }
 
             /* remove the tag from the hashtable. */
-            critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+            critical_block(&tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
 
             rc_dec(tag);
             return rc;
         }
 
         /* clear up any remaining flags.  This should be refactored. */
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             tag->read_in_flight = 0;
             tag->write_in_flight = 0;
 
@@ -1461,12 +1475,12 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     /* close all tags. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Closing all tags.");
 
-    critical_block(inst->tag_lookup_mutex) { tag_table_entries = hashtable_capacity(inst->tags); }
+    critical_block(&inst->tag_lookup_mutex) { tag_table_entries = hashtable_capacity(inst->tags); }
 
     for(int i = 0; i < tag_table_entries; i++) {
         plc_tag_p tag = NULL;
 
-        critical_block(inst->tag_lookup_mutex) {
+        critical_block(&inst->tag_lookup_mutex) {
             tag_table_entries = hashtable_capacity(inst->tags);
 
             if(i < tag_table_entries && tag_table_entries >= 0) {
@@ -1491,7 +1505,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
              * public plc_tag_destroy(): its lib_instance_acquire() would correctly
              * (and unhelpfully) fail here, since the gate is deliberately already
              * closed by this point to stop any *new* tag creation. */
-            critical_block(inst->tag_lookup_mutex) { hashtable_remove(inst->tags, (int64_t)tag->tag_id); }
+            critical_block(&inst->tag_lookup_mutex) { hashtable_remove(inst->tags, (int64_t)tag->tag_id); }
             destroy_tag_common(tag);
 
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -1640,7 +1654,7 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callbac
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->callback) {
             rc = PLCTAG_ERR_DUPLICATE;
         } else {
@@ -1685,7 +1699,7 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->callback) {
             rc = PLCTAG_STATUS_OK;
             tag->callback = NULL;
@@ -1788,7 +1802,7 @@ LIB_EXPORT int plc_tag_lock(int32_t id) {
     /* FIXME - there has to be a better way that this! */
     /* we cannot nest the mutexes otherwise we will deadlock. */
     do {
-        critical_block(tag->api_mutex) { rc = mutex_try_lock(tag->ext_mutex); }
+        critical_block(&tag->api_mutex) { rc = mutex_try_lock(&tag->ext_mutex); }
 
         /* if the mutex is already locked then we get a mutex lock error. */
         if(rc == PLCTAG_ERR_MUTEX_LOCK) {
@@ -1830,7 +1844,7 @@ LIB_EXPORT int plc_tag_unlock(int32_t id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) { rc = mutex_unlock(tag->ext_mutex); }
+    critical_block(&tag->api_mutex) { rc = mutex_unlock(&tag->ext_mutex); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -1898,21 +1912,19 @@ static void destroy_tag_common(plc_tag_p tag) {
 
     plc_tag_abort_impl(tag);
 
-    critical_block(tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK); }
+    /*
+     * Delivering DESTROYED releases the callback.  From inside one of this tag's callbacks the
+     * delivery waits for that callback to return, in the dispatch loop that called it.  A handler
+     * thread can still hold a reference and queue an event after this; with no callback it is
+     * dropped.
+     */
+    critical_block(&tag->api_mutex) {
+        tag_raise_event(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
+        plc_tag_generic_handle_event_callbacks(tag);
+    }
 
     /* wake the tickler */
     plc_tag_tickler_wake();
-
-    plc_tag_generic_handle_event_callbacks(tag);
-
-    /* The tickler thread can still hold a reference and call
-     * plc_tag_generic_handle_event_callbacks() after this point,
-     * so clear the callback and userdata under the API mutex.
-     * This guarantees no stale callback fires after plc_tag_destroy(). */
-    critical_block(tag->api_mutex) {
-        tag->callback = NULL;
-        tag->userdata = NULL;
-    }
 
     /* release the reference outside the mutex. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 " and tag mutex not locked.",
@@ -1942,7 +1954,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(inst->tag_lookup_mutex) { tag = hashtable_remove(inst->tags, tag_id); }
+    critical_block(&inst->tag_lookup_mutex) { tag = hashtable_remove(inst->tags, tag_id); }
     rc_dec(inst);
 
     if(!tag) {
@@ -1986,13 +1998,17 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    critical_block(tag->api_mutex) {
-        tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
-        plc_tag_generic_handle_event_callbacks(tag);
+    critical_block(&tag->api_mutex) {
+        uint8_t abort_count = 0;
 
         /* check read cache, if not expired, return existing data. */
         if(tag->read_cache_expire > time_ms()) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Returning cached data.");
+
+            /* a cached read still counts as a read for the callback. */
+            tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
+            plc_tag_generic_handle_event_callbacks(tag);
+
             rc = PLCTAG_STATUS_OK;
             is_done = 1;
             break;
@@ -2008,6 +2024,19 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         if(tag->tag_is_dirty) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has locally updated data that will be overwritten!");
             rc = PLCTAG_ERR_BUSY;
+            is_done = 1;
+            break;
+        }
+
+        /* not raised for a refused read. */
+        abort_count = tag->abort_count;
+
+        tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
+        plc_tag_generic_handle_event_callbacks(tag);
+
+        /* the callback aborted or destroyed the tag, so the read must not start. */
+        if(tag->abort_count != abort_count) {
+            rc = PLCTAG_ERR_ABORT;
             is_done = 1;
             break;
         }
@@ -2106,7 +2135,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         }
 
         /* the read is not in flight anymore. */
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             tag->read_in_flight = 0;
             tag->read_complete = 0;
             /* is_done = 1; */
@@ -2201,7 +2230,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->read_in_flight || tag->write_in_flight) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");
             is_done = 1;
@@ -2226,8 +2255,18 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
          * application code to fill in the tag data buffer right before
          * we start the write process.
          */
+        uint8_t abort_count = tag->abort_count;
+
         tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, tag->status);
         plc_tag_generic_handle_event_callbacks(tag);
+
+        /* the callback aborted or destroyed the tag, so the write must not start. */
+        if(tag->abort_count != abort_count) {
+            tag->write_in_flight = 0;
+            rc = PLCTAG_ERR_ABORT;
+            is_done = 1;
+            break;
+        }
 
         /* the protocol implementation does not do the timeout. */
         if(tag->vtable && tag->vtable->write) {
@@ -2312,7 +2351,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
         }
 
         /* the write is not in flight anymore. */
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             tag->write_in_flight = 0;
             tag->write_complete = 0;
             is_done = 1;
@@ -2322,7 +2361,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
     }
 
     if(is_done) {
-        critical_block(tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc); }
+        critical_block(&tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc); }
     }
 
     /* fire any events that are pending. */
@@ -2374,7 +2413,7 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             return default_value;
         }
 
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             const attr_def_t *def = attr_find(tag, attrib_name);
 
             if(def) {
@@ -2440,7 +2479,7 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
             return PLCTAG_ERR_NOT_FOUND;
         }
 
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             const attr_def_t *def = attr_find(tag, attrib_name);
 
             if(def) {
@@ -2512,7 +2551,7 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_n
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         const attr_def_t *def = attr_find(tag, attrib_name);
 
         if(def) {
@@ -2571,7 +2610,7 @@ LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         const attr_def_t *def = attr_find(tag, attrib_name);
 
         if(!def) {
@@ -2610,7 +2649,7 @@ LIB_EXPORT int plc_tag_get_size(int32_t id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         result = tag->size;
         tag->status = PLCTAG_STATUS_OK;
     }
@@ -2642,7 +2681,7 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    critical_block(tag->api_mutex) { rc = resize_tag_buffer_unsafe(tag, new_size); }
+    critical_block(&tag->api_mutex) { rc = resize_tag_buffer_unsafe(tag, new_size); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -2732,7 +2771,7 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) { res = plc_tag_get_bit_impl(tag, offset_bit); }
+    critical_block(&tag->api_mutex) { res = plc_tag_get_bit_impl(tag, offset_bit); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -2812,7 +2851,7 @@ LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) { res = plc_tag_set_bit_impl(tag, offset_bit, val); }
+    critical_block(&tag->api_mutex) { res = plc_tag_set_bit_impl(tag, offset_bit, val); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -2832,7 +2871,7 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -2884,7 +2923,7 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -2940,7 +2979,7 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -2950,7 +2989,7 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset) {
         }
 
         if(!tag->is_bit) {
-            critical_block(tag->api_mutex) {
+            critical_block(&tag->api_mutex) {
                 if(tag_range_is_valid(tag, offset, (int)sizeof(int64_t))) {
                     res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0)
                                     + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8)
@@ -2994,7 +3033,7 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3048,7 +3087,7 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3094,7 +3133,7 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3145,7 +3184,7 @@ LIB_EXPORT int32_t plc_tag_get_int32(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3192,7 +3231,7 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3243,7 +3282,7 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3289,7 +3328,7 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3339,7 +3378,7 @@ LIB_EXPORT int16_t plc_tag_get_int16(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3385,7 +3424,7 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3435,7 +3474,7 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3479,7 +3518,7 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3528,7 +3567,7 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3573,7 +3612,7 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3621,7 +3660,7 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3677,7 +3716,7 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3736,7 +3775,7 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset) {
         return res;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3788,7 +3827,7 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* is there data? */
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
@@ -3881,7 +3920,7 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
     /* set all buffer bytes to zero. */
     mem_set(buffer, 0, buffer_length);
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         int string_length = get_string_length_unsafe(tag, string_start_offset);
 
         /* a bad start offset shows up as a negative length here.  Do not treat it as a count. */
@@ -3992,7 +4031,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
     }
 
     /* we may be changing things, so take the mutex */
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         int old_string_size_in_buffer = 0;
         int new_string_size_in_buffer = 0;
 
@@ -4211,7 +4250,7 @@ LIB_EXPORT int plc_tag_get_string_capacity(int32_t id, int string_start_offset) 
     }
 
     /* FIXME - there is no capacity that is valid if it str_max_capacity is not set.  Should return 0 or an error. */
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         string_capacity = (tag->byte_order->str_max_capacity ? (int)(tag->byte_order->str_max_capacity) :
                                                                get_string_length_unsafe(tag, string_start_offset));
     }
@@ -4262,7 +4301,7 @@ LIB_EXPORT int plc_tag_get_string_length(int32_t id, int string_start_offset) {
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
-    critical_block(tag->api_mutex) { string_length = get_string_length_unsafe(tag, string_start_offset); }
+    critical_block(&tag->api_mutex) { string_length = get_string_length_unsafe(tag, string_start_offset); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -4311,7 +4350,7 @@ LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offs
     }
 
     /* FIXME - what about byte swapping?  If the string length is not even, what happens? */
-    critical_block(tag->api_mutex) { total_length = get_string_total_length_unsafe(tag, string_start_offset); }
+    critical_block(&tag->api_mutex) { total_length = get_string_total_length_unsafe(tag, string_start_offset); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -4357,7 +4396,7 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
     }
 
     if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag_range_is_valid(tag, offset, buffer_size)) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
@@ -4419,7 +4458,7 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
     }
 
     if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag_range_is_valid(tag, offset, buffer_size)) {
                 int i;
                 for(i = 0; i < buffer_size; i++) { buffer[i] = tag->data[offset + i]; }
@@ -4849,7 +4888,7 @@ plc_tag_p lookup_tag(int32_t tag_id) {
         return NULL;
     }
 
-    critical_block(inst->tag_lookup_mutex) {
+    critical_block(&inst->tag_lookup_mutex) {
         tag = hashtable_get(inst->tags, (int64_t)tag_id);
 
         if(tag && tag->tag_id == tag_id) {
@@ -4890,7 +4929,7 @@ int add_tag_lookup(plc_tag_p tag) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Starting.");
 
-    critical_block(tag->instance->tag_lookup_mutex) {
+    critical_block(&tag->instance->tag_lookup_mutex) {
         int attempts = 0;
 
         /* only get this when we hold the mutex. */

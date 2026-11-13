@@ -46,6 +46,7 @@
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
 #include <utils/random_utils.h>
+#include <utils/time_utils.h>
 
 /* Track active session handler threads for proper shutdown synchronization */
 static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
@@ -166,14 +167,14 @@ static int session_request_increase_buffer(ab_request_p request, int new_capacit
 static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason);
 
 
-static volatile mutex_p session_mutex = NULL;
+static mutex_t session_mutex;
 static volatile vector_p sessions = NULL;
 
 
 int session_startup(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    if((rc = mutex_create((mutex_p *)&session_mutex)) != PLCTAG_STATUS_OK) {
+    if((rc = mutex_init(&session_mutex)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
         return rc;
     }
@@ -199,8 +200,8 @@ void session_teardown(void) {
     /* flag all open sessions for termination */
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Marking all open sessions for termination.");
 
-    if(session_mutex) {
-        critical_block(session_mutex) {
+    if(session_mutex.initialized) {
+        critical_block(&session_mutex) {
             if(sessions == NULL) {
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session list is already destroyed.");
 
@@ -220,11 +221,11 @@ void session_teardown(void) {
     /* flag the whole library shutting down. */
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Setting library shutdown flag.");
 
-    if(sessions && session_mutex) {
+    if(sessions && session_mutex.initialized) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Waiting for sessions to terminate.");
 
         while(1) {
-            critical_block(session_mutex) { remaining_sessions = vector_length(sessions); }
+            critical_block(&session_mutex) { remaining_sessions = vector_length(sessions); }
 
             /* wait for things to terminate. */
             if(remaining_sessions > 0) {
@@ -266,9 +267,8 @@ void session_teardown(void) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Destroying session mutex.");
 
-    if(session_mutex) {
-        mutex_destroy((mutex_p *)&session_mutex);
-        session_mutex = NULL;
+    if(session_mutex.initialized) {
+        mutex_destroy(&session_mutex);
     }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
@@ -314,7 +314,7 @@ int session_get_max_payload(ab_session_p session) {
         return 0;
     }
 
-    critical_block(session->session_mutex) { result = GET_MAX_PAYLOAD_SIZE(session); }
+    critical_block(&session->session_mutex) { result = GET_MAX_PAYLOAD_SIZE(session); }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "max payload size is %d bytes.", result);
 
@@ -329,7 +329,7 @@ int session_get_available_cip_payload_space(ab_session_p session) {
         return 0;
     }
 
-    critical_block(session->session_mutex) {
+    critical_block(&session->session_mutex) {
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
         result = max_payload_size;
 
@@ -390,7 +390,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
                connection_inactivity_timeout_ms);
     }
 
-    critical_block(session_mutex) {
+    critical_block(&session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
         if(shared_session) {
             session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id);
@@ -514,7 +514,7 @@ int add_session(ab_session_p s) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
 
-    critical_block(session_mutex) { rc = add_session_unsafe(s); }
+    critical_block(&session_mutex) { rc = add_session_unsafe(s); }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
 
@@ -551,7 +551,7 @@ int remove_session(ab_session_p s) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
 
     if(s->on_list) {
-        critical_block(session_mutex) { rc = remove_session_unsafe(s); }
+        critical_block(&session_mutex) { rc = remove_session_unsafe(s); }
     } else {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session not on list, skipping removal.");
     }
@@ -932,7 +932,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     session->orig_connection_id = ++connection_id;
 
     /* create the session mutex. */
-    if((rc = mutex_create(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
+    if((rc = mutex_init(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create session mutex!");
         return rc_dec(session);
     }
@@ -1168,7 +1168,7 @@ void session_destroy(void *session_arg) {
         thread_join(session->handler_thread);
 
         /* FIXME - is this critical block needed? */
-        critical_block(session->session_mutex) {
+        critical_block(&session->session_mutex) {
             thread_destroy(&(session->handler_thread));
             session->handler_thread = NULL;
         }
@@ -1176,7 +1176,7 @@ void session_destroy(void *session_arg) {
 
 
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
-    critical_block(session->session_mutex) {
+    critical_block(&session->session_mutex) {
         /* close off the connection if is one. This helps the PLC clean up. */
         if(session->targ_connection_id) {
             /*
@@ -1215,9 +1215,8 @@ void session_destroy(void *session_arg) {
 
     /* we are done with the mutex, finally destroy it. */
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Destroying session mutex.");
-    if(session->session_mutex) {
+    if(session->session_mutex.initialized) {
         mutex_destroy(&(session->session_mutex));
-        session->session_mutex = NULL;
     }
 
     if(!session->data_buffer_is_static) { mem_free(session->data); }
@@ -1256,7 +1255,7 @@ int session_add_request(ab_session_p session, ab_request_p req) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", session, req);
 
-    critical_block(session->session_mutex) {
+    critical_block(&session->session_mutex) {
         if(!session) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, req->tag_id, "Session is null!");
             return PLCTAG_ERR_NULL_PTR;
@@ -1348,7 +1347,7 @@ static inline void session_publish_event(ab_session_p session, int32_t event_typ
  * mutex to avoid reading one from before this transition and the other from after it --
  * see the comment there. */
 static inline void session_set_connection_status(ab_session_p session, int32_t new_status, int32_t new_reason) {
-    critical_block(session->session_mutex) {
+    critical_block(&session->session_mutex) {
         int32_t old_status = atomic_get_int32(&session->connection_status);
         atomic_set_int32(&session->connection_status_reason, new_reason);
         atomic_set_int32(&session->connection_status, new_status);
@@ -1392,7 +1391,7 @@ THREAD_FUNC(session_handler) {
          */
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Critical block.");
-        critical_block(session->session_mutex) { purge_aborted_requests_unsafe(session); }
+        critical_block(&session->session_mutex) { purge_aborted_requests_unsafe(session); }
 
         switch(state) {
             case SESSION_OPEN_SOCKET_START:
@@ -1546,7 +1545,7 @@ THREAD_FUNC(session_handler) {
                 }
 
                 /* if there is work to do, make sure we do not disconnect. */
-                critical_block(session->session_mutex) {
+                critical_block(&session->session_mutex) {
                     int num_reqs = vector_length(session->requests);
                     if(num_reqs > 0) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
@@ -1585,7 +1584,7 @@ THREAD_FUNC(session_handler) {
                 }
 
                 /* if there is work to do, make sure we signal the condition var. */
-                critical_block(session->session_mutex) {
+                critical_block(&session->session_mutex) {
                     int num_reqs = vector_length(session->requests);
                     if(num_reqs > 0) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
@@ -1681,7 +1680,7 @@ THREAD_FUNC(session_handler) {
 
                 /* if there is work to do, reconnect.. */
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Critical block.");
-                critical_block(session->session_mutex) {
+                critical_block(&session->session_mutex) {
                     if(vector_length(session->requests) > 0) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
                                "There are requests waiting, reopening connection to PLC.");
@@ -1729,7 +1728,7 @@ THREAD_FUNC(session_handler) {
     /*
      * One last time before we exit.
      */
-    critical_block(session->session_mutex) { purge_aborted_requests_unsafe(session); }
+    critical_block(&session->session_mutex) { purge_aborted_requests_unsafe(session); }
 
     /* Decrement the count of active session handlers */
     atomic_add_int32(&session_handlers_active, -1);
@@ -1806,7 +1805,7 @@ int process_requests(ab_session_p session) {
     session->data_offset = 0;
 
     /* grab a request off the front of the list. */
-    critical_block(session->session_mutex) {
+    critical_block(&session->session_mutex) {
         // FIXME - no logging in a mutex!
         // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
 
@@ -2116,7 +2115,7 @@ int process_requests(ab_session_p session) {
 
             /* session->requests is also written by session_add_request() (tickler thread)
              * under session->session_mutex, so this push-back needs the same lock. */
-            critical_block(session->session_mutex) {
+            critical_block(&session->session_mutex) {
                 for(int i = num_bundled_requests - 1; i >= 0; i--) {
                     if(bundled_requests[i]) { vector_insert(session->requests, 0, bundled_requests[i]); }
                 }
@@ -2158,7 +2157,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
 
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, request->tag_id, "Request buffer too small, allocating larger buffer.");
 
-            critical_block(session->session_mutex) {
+            critical_block(&session->session_mutex) {
                 int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
 
                 // FIXME - no logging in a mutex!
@@ -2244,7 +2243,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
 
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, request->tag_id, "Request buffer too small, allocating larger buffer.");
 
-            critical_block(session->session_mutex) {
+            critical_block(&session->session_mutex) {
                 int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
 
                 // FIXME: no logging in a mutex!
@@ -2885,7 +2884,7 @@ int send_forward_open_request(ab_session_p session) {
     max_payload = (uint16_t)(session->only_use_old_forward_open ? session->fo_conn_size : session->fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
-    critical_block(session->session_mutex) {
+    critical_block(&session->session_mutex) {
         session->max_payload_guess =
             ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload :
                                                                                                session->max_payload_guess);
@@ -3181,7 +3180,7 @@ int receive_forward_open_response(ab_session_p session) {
                                    supported_size, MIN_PAYLOAD_SIZE(session));
                             rc = PLCTAG_ERR_TOO_SMALL;
                         } else if(supported_size <= session->max_payload_guess) {
-                            critical_block(session->session_mutex) { session->max_payload_guess = supported_size; }
+                            critical_block(&session->session_mutex) { session->max_payload_guess = supported_size; }
                             rc = PLCTAG_ERR_TOO_LARGE;
                         } else {
                             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
@@ -3222,7 +3221,7 @@ int receive_forward_open_response(ab_session_p session) {
         session->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
         session->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
 
-        critical_block(session->session_mutex) { session->max_payload_size = session->max_payload_guess; }
+        critical_block(&session->session_mutex) { session->max_payload_size = session->max_payload_guess; }
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0,
                "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
@@ -3365,7 +3364,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
     size_t request_capacity = 0;
     uint8_t *buffer = NULL;
 
-    critical_block(session->session_mutex) {
+    critical_block(&session->session_mutex) {
         int available_payload = session_get_available_cip_payload_space(session);
 
         // FIXME: no logging in a mutex!

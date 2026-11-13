@@ -542,14 +542,14 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
         omron_request_p req = NULL;
         bool release_tag_ref = false;
 
-        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+        critical_block(&tag->api_mutex) { req = rc_inc(tag->req); }
 
         if(req) {
             spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
 
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id,
                    "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-            critical_block(tag->api_mutex) {
+            critical_block(&tag->api_mutex) {
                 if(tag->req != req) {
                     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Request got changed out from underneath us!");
                 }
@@ -622,7 +622,7 @@ int omron_tag_abort(omron_tag_p tag) {
     if(tag) {
         omron_request_p req = NULL;
 
-        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+        critical_block(&tag->api_mutex) { req = rc_inc(tag->req); }
 
         if(req) {
             spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
@@ -706,14 +706,12 @@ void omron_tag_destroy(omron_tag_p tag) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "No conn pointer!");
     }
 
-    if(tag->ext_mutex) {
+    if(tag->ext_mutex.initialized) {
         mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
     }
 
-    if(tag->api_mutex) {
+    if(tag->api_mutex.initialized) {
         mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
     }
 
     if(tag->tag_cond_wait) {
@@ -1218,7 +1216,7 @@ int omron_check_request_status(omron_tag_p tag) {
             break;
         }
 
-        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+        critical_block(&tag->api_mutex) { req = rc_inc(tag->req); }
 
         if(!req) {
             if(tag->read_in_progress || tag->write_in_progress) {

@@ -45,6 +45,7 @@
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
 #include <utils/random_utils.h>
+#include <utils/time_utils.h>
 
 #define MAX_REQUESTS (400)
 
@@ -120,7 +121,7 @@ static void request_destroy(void *req_arg);
 static int conn_request_increase_buffer(omron_request_p request, int new_capacity);
 
 
-static volatile mutex_p conn_mutex = NULL;
+static mutex_t conn_mutex;
 static volatile vector_p conns = NULL;
 
 /* Track active handler threads for proper shutdown synchronization */
@@ -130,7 +131,7 @@ static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
 int conn_startup(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    if((rc = mutex_create((mutex_p *)&conn_mutex)) != PLCTAG_STATUS_OK) {
+    if((rc = mutex_init(&conn_mutex)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_ERROR, 0, "Unable to create conn mutex %s!", plc_tag_decode_error(rc));
         return rc;
     }
@@ -148,8 +149,8 @@ void conn_teardown(void) {
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting.");
 
     /* Mark all conns as terminating to wake handler threads quickly. */
-    if(conns && conn_mutex) {
-        critical_block(conn_mutex) {
+    if(conns && conn_mutex.initialized) {
+        critical_block(&conn_mutex) {
             int n = vector_length(conns);
             for(int i = 0; i < n; i++) {
                 omron_conn_p conn = vector_get(conns, i);
@@ -161,13 +162,13 @@ void conn_teardown(void) {
         }
     }
 
-    if(conns && conn_mutex) {
+    if(conns && conn_mutex.initialized) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Waiting for conns to terminate.");
 
         while(1) {
             int remaining_conns = 0;
 
-            critical_block(conn_mutex) { remaining_conns = vector_length(conns); }
+            critical_block(&conn_mutex) { remaining_conns = vector_length(conns); }
 
             if(remaining_conns > 0) {
                 sleep_ms(10);
@@ -210,9 +211,8 @@ void conn_teardown(void) {
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Destroying conn mutex.");
 
-    if(conn_mutex) {
-        mutex_destroy((mutex_p *)&conn_mutex);
-        conn_mutex = NULL;
+    if(conn_mutex.initialized) {
+        mutex_destroy(&conn_mutex);
     }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
@@ -241,7 +241,7 @@ uint64_t conn_get_new_seq_id(omron_conn_p conn) {
     uint16_t res = 0;
 
     // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "entering critical block %p",conn_mutex);
-    critical_block(conn->mutex) { res = (uint16_t)conn_get_new_seq_id_unsafe(conn); }
+    critical_block(&conn->mutex) { res = (uint16_t)conn_get_new_seq_id_unsafe(conn); }
     // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "leaving critical block %p", conn_mutex);
 
     return res;
@@ -256,7 +256,7 @@ int conn_get_max_payload(omron_conn_p conn) {
         return 0;
     }
 
-    critical_block(conn->mutex) { result = GET_MAX_PAYLOAD_SIZE(conn); }
+    critical_block(&conn->mutex) { result = GET_MAX_PAYLOAD_SIZE(conn); }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "max payload size is %d bytes.", result);
 
@@ -272,7 +272,7 @@ int conn_get_available_cip_payload_space(omron_conn_p conn) {
         return 0;
     }
 
-    critical_block(conn->mutex) {
+    critical_block(&conn->mutex) {
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
         result = max_payload_size;
 
@@ -334,7 +334,7 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
                connection_inactivity_timeout_ms);
     }
 
-    critical_block(conn_mutex) {
+    critical_block(&conn_mutex) {
         /* if we are to share conns, then look for an existing one. */
         if(shared_conn) {
             conn = find_conn_by_host_unsafe(conn_gw, conn_path, connection_group_id);
@@ -419,7 +419,7 @@ int add_conn(omron_conn_p s) {
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Starting.");
 
-    critical_block(conn_mutex) { rc = add_conn_unsafe(s); }
+    critical_block(&conn_mutex) { rc = add_conn_unsafe(s); }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Done.");
 
@@ -452,7 +452,7 @@ int remove_conn(omron_conn_p s) {
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Starting.");
 
     if(s->on_list) {
-        critical_block(conn_mutex) { rc = remove_conn_unsafe(s); }
+        critical_block(&conn_mutex) { rc = remove_conn_unsafe(s); }
     }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Done.");
@@ -712,7 +712,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
      */
 
     /* create the conn mutex. */
-    if((rc = mutex_create(&(conn->mutex))) != PLCTAG_STATUS_OK) {
+    if((rc = mutex_init(&(conn->mutex))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create conn mutex!");
         return rc_dec(conn);
     }
@@ -947,14 +947,14 @@ void conn_destroy(void *conn_arg) {
         thread_join(conn->handler_thread);
 
         /* FIXME - is this critical block needed? */
-        critical_block(conn->mutex) {
+        critical_block(&conn->mutex) {
             thread_destroy(&(conn->handler_thread));
             conn->handler_thread = NULL;
         }
     }
 
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
-    critical_block(conn->mutex) {
+    critical_block(&conn->mutex) {
         /* close off the connection if is one. This helps the PLC clean up. */
         if(conn->targ_connection_id) {
             /*
@@ -995,9 +995,8 @@ void conn_destroy(void *conn_arg) {
 
     /* we are done with the mutex, finally destroy it. */
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Destroying conn mutex.");
-    if(conn->mutex) {
+    if(conn->mutex.initialized) {
         mutex_destroy(&(conn->mutex));
-        conn->mutex = NULL;
     }
 
     if(!conn->data_buffer_is_static) { mem_free(conn->data); }
@@ -1071,7 +1070,7 @@ int conn_add_request(omron_conn_p conn, omron_request_p req) {
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, req->tag_id, "Starting. conn=%p, req=%p", conn, req);
 
-    critical_block(conn->mutex) { rc = conn_add_request_unsafe(conn, req); }
+    critical_block(&conn->mutex) { rc = conn_add_request_unsafe(conn, req); }
 
     cond_signal(conn->wait_cond);
 
@@ -1108,7 +1107,7 @@ typedef enum {
  * mutex to avoid reading one from before this transition and the other from after it --
  * see the comment there. */
 static inline void conn_set_connection_status(omron_conn_p conn, int32_t new_status) {
-    critical_block(conn->mutex) {
+    critical_block(&conn->mutex) {
         int32_t old_status = atomic_get_int32(&conn->connection_status);
 
         if(old_status != new_status) {
@@ -1178,7 +1177,7 @@ THREAD_FUNC(conn_handler) {
          */
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_SPEW, 0, "Critical block.");
-        critical_block(conn->mutex) { purge_aborted_requests_unsafe(conn); }
+        critical_block(&conn->mutex) { purge_aborted_requests_unsafe(conn); }
 
         switch(state) {
             case CONN_OPEN_SOCKET_START:
@@ -1321,7 +1320,7 @@ THREAD_FUNC(conn_handler) {
                 }
 
                 /* if there is work to do, make sure we do not disconnect. */
-                critical_block(conn->mutex) {
+                critical_block(&conn->mutex) {
                     int num_reqs = vector_length(conn->requests);
                     if(num_reqs > 0) {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,
@@ -1357,7 +1356,7 @@ THREAD_FUNC(conn_handler) {
                 }
 
                 /* if there is work to do, make sure we signal the condition var. */
-                critical_block(conn->mutex) {
+                critical_block(&conn->mutex) {
                     int num_reqs = vector_length(conn->requests);
                     if(num_reqs > 0) {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,
@@ -1442,7 +1441,7 @@ THREAD_FUNC(conn_handler) {
 
                 /* if there is work to do, reconnect.. */
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_SPEW, 0, "Critical block.");
-                critical_block(conn->mutex) {
+                critical_block(&conn->mutex) {
                     if(vector_length(conn->requests) > 0) {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,
                                "There are requests waiting, reopening connection to PLC.");
@@ -1485,7 +1484,7 @@ THREAD_FUNC(conn_handler) {
      * One last time before we exit.
      */
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Critical block.");
-    critical_block(conn->mutex) { purge_aborted_requests_unsafe(conn); }
+    critical_block(&conn->mutex) { purge_aborted_requests_unsafe(conn); }
 
     /* Decrement the count of active handler threads */
     atomic_add_int32(&handler_threads_active, -1);
@@ -1565,7 +1564,7 @@ int process_requests(omron_conn_p conn) {
     conn->data_offset = 0;
 
     /* grab a request off the front of the list. */
-    critical_block(conn->mutex) {
+    critical_block(&conn->mutex) {
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
 
         // FIXME - no logging in a mutex!
@@ -1955,7 +1954,7 @@ int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) 
 
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Request buffer too small, allocating larger buffer.");
 
-            critical_block(conn->mutex) {
+            critical_block(&conn->mutex) {
                 int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
 
                 // FIXME - no logging in a mutex!
@@ -2041,7 +2040,7 @@ int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) 
 
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Request buffer too small, allocating larger buffer.");
 
-            critical_block(conn->mutex) {
+            critical_block(&conn->mutex) {
                 int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
 
                 // FIXME: no logging in a mutex!
@@ -2918,7 +2917,7 @@ int receive_forward_open_response(omron_conn_p conn) {
 
         /* success! conn_create_request() reads max_payload_size (via GET_MAX_PAYLOAD_SIZE)
          * under conn->mutex, so committing it here needs the same lock. */
-        critical_block(conn->mutex) {
+        critical_block(&conn->mutex) {
             conn->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
             conn->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
 
@@ -3066,7 +3065,7 @@ int conn_create_request(omron_conn_p conn, int tag_id, omron_request_p *req) {
     size_t request_capacity = 0;
     uint8_t *buffer = NULL;
 
-    critical_block(conn->mutex) {
+    critical_block(&conn->mutex) {
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
 
         // FIXME: no logging in a mutex!

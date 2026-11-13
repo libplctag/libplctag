@@ -167,6 +167,20 @@ extern void *hashtable_remove(hashtable_p table, int64_t key) {
 }
 
 
+extern int32_t hashtable_capacity(hashtable_p table) {
+    if(!table) { return PLCTAG_ERR_NULL_PTR; }
+
+    return table->total_entries;
+}
+
+
+extern void *hashtable_get_index(hashtable_p table, int32_t index) {
+    if(!table || index < 0 || index >= table->total_entries) { return NULL; }
+
+    return table->entries[index].data;
+}
+
+
 extern int32_t hashtable_destroy(hashtable_p table) {
     pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Starting");
 

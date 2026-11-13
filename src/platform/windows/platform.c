@@ -60,6 +60,7 @@
 #include <libplctag/lib/libplctag.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
+#include <utils/time_utils.h>
 
 
 /*#ifdef __cplusplus
@@ -1718,38 +1719,6 @@ int sleep_ms(int ms) {
 }
 
 
-/*
- * time_ms
- *
- * Milliseconds on a monotonic clock, for deadlines and elapsed time only: a change to the
- * system clock must not move them.  Not a date.  The performance counter, not
- * GetTickCount64(): that one moves in 10-16ms steps, and deadlines are as close as 1ms.
- *
- * The counter includes time the system spends suspended, so a deadline that passes during a
- * suspend has expired on resume, as on POSIX (see the posix time_ms).
- */
-int64_t time_ms(void) {
-    LARGE_INTEGER count;
-    LARGE_INTEGER freq;
-
-    QueryPerformanceCounter(&count);
-    QueryPerformanceFrequency(&freq);
-
-    /* split so the multiply cannot overflow. */
-    return (count.QuadPart / freq.QuadPart) * 1000 + ((count.QuadPart % freq.QuadPart) * 1000) / freq.QuadPart;
-}
-
-
-/* Microseconds on the same clock as time_ms(), for waits shorter than a millisecond. */
-int64_t time_us(void) {
-    LARGE_INTEGER count;
-    LARGE_INTEGER freq;
-
-    QueryPerformanceCounter(&count);
-    QueryPerformanceFrequency(&freq);
-
-    return (count.QuadPart / freq.QuadPart) * 1000000 + ((count.QuadPart % freq.QuadPart) * 1000000) / freq.QuadPart;
-}
 
 
 struct tm *localtime_r(const time_t *timep, struct tm *result) {

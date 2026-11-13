@@ -40,7 +40,7 @@
  * cannot see the damage.  Only reading the whole enclosing word can.
  *
  * The method: stamp a known alternating pattern on the word, flip one bit through the bit
- * tag, and read the word back.  Exactly one bit may differ, and it must be the one asked
+ * tag, read it back through the bit tag, and read the word back.  Exactly one bit may differ, and it must be the one asked
  * for.  Both polarities are exercised, because an AND mask and an OR mask fail differently.
  *
  * The original word is restored on the way out, including after a failure, so running this
@@ -70,6 +70,7 @@ static int32_t open_tag(const char *tag_string, int timeout);
 static int read_word(int32_t tag, int word_size, int timeout, uint64_t *result);
 static int write_word(int32_t tag, int word_size, int timeout, uint64_t value);
 static int write_bit(int32_t tag, int timeout, int value, bool refresh);
+static int check_bit(int32_t tag, int timeout, int bit, int value);
 static int check_word(uint64_t expected, uint64_t actual, int bit, int value);
 
 
@@ -192,6 +193,9 @@ int main(int argc, char **argv) {
         rc = write_bit(bit_tag, timeout, 1, refresh);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
+        rc = check_bit(bit_tag, timeout, bit, 1);
+        if(rc != PLCTAG_STATUS_OK) { break; }
+
         rc = read_word(word_tag, word_size, timeout, &actual);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
@@ -200,6 +204,9 @@ int main(int argc, char **argv) {
 
         /* clear the bit: an AND mask that is too wide fails here and not above. */
         rc = write_bit(bit_tag, timeout, 0, refresh);
+        if(rc != PLCTAG_STATUS_OK) { break; }
+
+        rc = check_bit(bit_tag, timeout, bit, 0);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         rc = read_word(word_tag, word_size, timeout, &actual);
@@ -352,6 +359,28 @@ int write_bit(int32_t tag, int timeout, int value, bool refresh) {
     if(rc != PLCTAG_STATUS_OK) { printf("ERROR: unable to write the bit tag, %s!\n", plc_tag_decode_error(rc)); }
 
     return rc;
+}
+
+
+/* Read the bit back through the bit tag that wrote it. */
+int check_bit(int32_t tag, int timeout, int bit, int value) {
+    int rc = plc_tag_read(tag, timeout);
+    int actual = 0;
+
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("ERROR: unable to read the bit tag back, %s!\n", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    actual = plc_tag_get_bit(tag, 0);
+    if(actual != value) {
+        printf("ERROR: wrote bit %d as %d but the bit tag read back %d!\n", bit, value, actual);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    printf("Bit %d reads back as %d through the bit tag.\n", bit, value);
+
+    return PLCTAG_STATUS_OK;
 }
 
 

@@ -46,3 +46,6 @@ extern void *hashtable_get(hashtable_p table, int64_t key);
 extern int32_t hashtable_put(hashtable_p table, int64_t key, void *data);
 extern void *hashtable_remove(hashtable_p table, int64_t key);
 extern int32_t hashtable_destroy(hashtable_p table);
+/* Entry walk: indexes 0..hashtable_capacity()-1, NULL for empty entries.  Caller holds the table's lock. */
+extern int32_t hashtable_capacity(hashtable_p table);
+extern void *hashtable_get_index(hashtable_p table, int32_t index);

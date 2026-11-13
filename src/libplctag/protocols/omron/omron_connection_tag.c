@@ -146,7 +146,7 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
          * conn->mutex so we get a real, consistent point-in-time state rather than
          * a read_idx from before a transition paired with a status from after it --
          * see the comment in conn_set_connection_status(). */
-        critical_block(tag->conn->mutex) {
+        critical_block(&tag->conn->mutex) {
             tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
             tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
         }
@@ -194,48 +194,24 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
      * synthesise the creation-time state so the tag is not silently stuck. */
     if(tag->first_tickler_run) {
         tag->first_tickler_run = false;
-        if(tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN && tag->callback) {
-            tag->callback(tag->tag_id, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK,
-                          tag->userdata);
+        if(tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN) {
+            tag_event_push(raw_tag, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
         }
     }
 
+    /* a full event queue leaves the rest for the next pass. */
     while(read_idx != write_idx) {
-        read_idx = (read_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
-        int32_t event_type = tag->conn->conn_event_ring[read_idx].event_type;
-        int32_t status = tag->conn->conn_event_ring[read_idx].status;
+        int32_t next_idx = (read_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
+        int32_t event_type = tag->conn->conn_event_ring[next_idx].event_type;
 
-        if(tag->callback) {
-            switch(event_type) {
-                case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
-                    if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, status, tag->userdata); }
-                    break;
+        if(!tag_push_conn_event(raw_tag, event_type, tag->conn->conn_event_ring[next_idx].status, tag->io_events)) { break; }
 
-                case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED:
-                    if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, status, tag->userdata); }
-                    break;
+        if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) { tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET; }
 
-                case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED:
-                    if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, status, tag->userdata); }
-                    break;
-
-                case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED:
-                    if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, status, tag->userdata); }
-                    break;
-
-                default:
-                    if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) {
-                        tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET;
-                        tag->callback(tag->tag_id, event_type, PLCTAG_STATUS_OK, tag->userdata);
-                    } else {
-                        pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, tag->tag_id, "Unknown ring event type %d.", (int)event_type);
-                    }
-                    break;
-            }
-        }
+        read_idx = next_idx;
     }
 
-    tag->event_ring_read_idx = write_idx;
+    tag->event_ring_read_idx = read_idx;
     return PLCTAG_STATUS_OK;
 }
 
@@ -255,14 +231,12 @@ static void omron_connection_tag_destructor(void *ptr) {
         tag->conn = NULL;
     }
 
-    if(tag->ext_mutex) {
+    if(tag->ext_mutex.initialized) {
         mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
     }
 
-    if(tag->api_mutex) {
+    if(tag->api_mutex.initialized) {
         mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
     }
 
     if(tag->tag_cond_wait) {

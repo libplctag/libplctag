@@ -52,6 +52,7 @@
 #include <platform.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <utils/time_utils.h>
 
 
 /* nothing listens here, so a connect attempt fails without reaching a device */

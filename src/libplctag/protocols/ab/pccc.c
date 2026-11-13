@@ -1753,7 +1753,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
 
     /* set tag->req if successful, else clean up */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag->req) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
                 rc = PLCTAG_ERR_BAD_DATA;
@@ -2031,7 +2031,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
 
     /* set tag->req if successful, else clean up */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag->req) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
                 rc = PLCTAG_ERR_BAD_DATA;
@@ -2232,7 +2232,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
 
     /* set tag->req if successful, else clean up */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag->req) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
                 rc = PLCTAG_ERR_BAD_DATA;
@@ -2435,7 +2435,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
 
     /* set tag->req if successful, else clean up */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag->req) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
                 rc = PLCTAG_ERR_BAD_DATA;
@@ -2777,7 +2777,7 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
 
     /* set tag->req if successful, else clean up */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag->req) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
                 rc = PLCTAG_ERR_BAD_DATA;
@@ -3046,7 +3046,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
 
     /* set tag->req if successful, else clean up */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag->req) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
                 rc = PLCTAG_ERR_BAD_DATA;
@@ -3238,7 +3238,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
 
     /* set tag->req if successful, else clean up */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag->req) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
                 rc = PLCTAG_ERR_BAD_DATA;
@@ -3433,7 +3433,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
 
     /* set tag->req if successful, else clean up */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             if(tag->req) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
                 rc = PLCTAG_ERR_BAD_DATA;

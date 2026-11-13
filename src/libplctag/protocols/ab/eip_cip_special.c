@@ -905,7 +905,7 @@ int identity_tag_build_read_request_connected(ab_tag_p tag) {
     req->allow_packing = 0; /* identity requests should not be packed */
 
     /* save the request for later */
-    critical_block(tag->api_mutex) { tag->req = req; }
+    critical_block(&tag->api_mutex) { tag->req = req; }
 
     /* add the request to the session's list */
     rc = session_add_request(tag->session, req);
@@ -1104,7 +1104,7 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
     req->allow_packing = 0;
 
     /* save the request for later */
-    critical_block(tag->api_mutex) { tag->req = req; }
+    critical_block(&tag->api_mutex) { tag->req = req; }
 
     /* add the request to the session's list */
     rc = session_add_request(tag->session, req);

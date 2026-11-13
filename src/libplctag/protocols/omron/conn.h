@@ -133,7 +133,7 @@ struct omron_conn_t {
 
     thread_p handler_thread;
     atomic_int32_t terminating;
-    mutex_p mutex;
+    mutex_t mutex;
     cond_p wait_cond;
 
     /* connection status - readable by tags via atomics */

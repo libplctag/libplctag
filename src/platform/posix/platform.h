@@ -229,8 +229,6 @@ extern int socket_destroy(sock_p *s);
 
 /* misc functions */
 extern int sleep_ms(int ms);
-extern int64_t time_ms(void);
-extern int64_t time_us(void);
 
 #define snprintf_platform snprintf
 
