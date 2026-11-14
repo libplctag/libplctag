@@ -115,6 +115,7 @@ typedef struct ab_plc_type_t {
     int8_t connected;
     bool allow_packing; /* the allow_packing attribute, default on; false means never. */
     bool needs_path;
+    bool fragmented; /* has Read and Write Tag Fragmented (0x52, 0x53). */
 
     /* the PLC-specific half of creating a tag.  from_src is set by plc_tag_create_from_tag(). */
     int (*tag_create)(ab_tag_p tag, attr attribs, bool from_src);

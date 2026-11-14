@@ -154,9 +154,7 @@ typedef enum {
     TAG_PROTOCOL_AB = 2,
     TAG_PROTOCOL_AB_CONNECTION = 3,
     TAG_PROTOCOL_MODBUS = 4,
-    TAG_PROTOCOL_OMRON = 5,
-    TAG_PROTOCOL_MB_CONNECTION = 6,
-    TAG_PROTOCOL_OMRON_CONNECTION = 7
+    TAG_PROTOCOL_MB_CONNECTION = 6
 } tag_protocol_t;
 
 
@@ -332,14 +330,13 @@ extern lib_instance_p lib_instance_acquire(void);
 extern void lib_instance_publish(void);
 
 /* Used only by initialize_modules() on a failure path after lib_init() has already
- * succeeded (e.g. ab_init()/mb_init()/omron_init() failing): discards the instance
+ * succeeded (e.g. ab_init()/mb_init() failing): discards the instance
  * lib_init() built without ever publishing it. */
 extern void lib_instance_discard_pending(void);
 
 /* tags that hold PLC data; system and connection tags cannot be auto-destroyed. */
 #define tag_can_auto_destroy(tag)                                                                              \
-    ((tag)->protocol_type == TAG_PROTOCOL_AB || (tag)->protocol_type == TAG_PROTOCOL_MODBUS                    \
-     || (tag)->protocol_type == TAG_PROTOCOL_OMRON)
+    ((tag)->protocol_type == TAG_PROTOCOL_AB || (tag)->protocol_type == TAG_PROTOCOL_MODBUS)
 
 /* zero, or at least this many seconds. */
 #define TAG_AUTO_DESTROY_MIN_SEC (10)
@@ -359,6 +356,16 @@ extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
                                     void *userdata);
 
 static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
+    /*
+     * CREATED, or the create read completing, ends the create, callback or not; a failure there
+     * sticks.  A refusal (BUSY) of an operation tried before then is not the create's result.
+     */
+    if(!tag->create_done && status != PLCTAG_STATUS_PENDING && status != PLCTAG_ERR_BUSY
+       && (event == PLCTAG_EVENT_CREATED || event == PLCTAG_EVENT_READ_COMPLETED)) {
+        tag->create_done = true;
+        tag->create_result = status;
+    }
+
     /* do not stack up events if there is no callback. */
     if(!tag->callback) { return; }
 
@@ -373,7 +380,8 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
             if(!tag->had_created_event) {
                 tag->had_created_event = 1;
                 tag->event_creation_complete = 1;
-                tag_event_push(tag, PLCTAG_EVENT_CREATED, status);
+                /* an abort that ends the create is a failed create, whatever the abort returned. */
+                tag_event_push(tag, PLCTAG_EVENT_CREATED, (event == PLCTAG_EVENT_ABORTED) ? (int8_t)PLCTAG_ERR_ABORT : status);
             } else if(event == PLCTAG_EVENT_CREATED) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CREATED skipped due to duplication.");
             }

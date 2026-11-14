@@ -56,6 +56,8 @@
 #    define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4000)
 #    define MAX_CIP_MICRO800_MSG_SIZE (0x01FF & 504)
 #    define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4000)
+#    define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
+#    define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990)
 
 /* maximum for PCCC embedded within CIP. */
 #    define MAX_CIP_PCCC_MSG_SIZE (244)
@@ -114,12 +116,21 @@ struct ab_session_t {
     /* AB_PLC_NONE until identify picks it when no plc= was given.  Under session_mutex. */
     plc_type_t plc_type;
 
-    /* why identify refused the device, or OK.  Under session_mutex. */
-    int32_t identify_rc;
+    /* why the PLC refused this session for good (identify or the route), or OK.  Under session_mutex. */
+    int32_t refused_rc;
 
     /* the Forward Open path: the route, then the Message Router when connected. */
     uint8_t *conn_path;
     uint8_t conn_path_size;
+    /* Forward Open negotiation: the last refusal's extended status, the size it offered, and the
+     * duplicate connection IDs refused in a row.  Handler thread only. */
+    uint16_t fo_ext_status;
+    uint16_t fo_offered_size;
+    uint32_t fo_dup_retries;
+
+    /* the longest wait between reconnects, from the connection_retry_max_delay_ms attribute. */
+    atomic_int32_t connection_retry_max_delay_ms;
+
     /* the route alone, which an Unconnected Send carries. */
     uint8_t *route_path;
     uint8_t route_path_size;
@@ -223,7 +234,7 @@ extern int session_get_available_cip_payload_space(ab_session_p session);
 extern int session_create_request(ab_session_p session, int tag_id, ab_request_p *request);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
 
-/* The PLC type, AB_PLC_NONE while identify runs; *identify_rc is set when identify refused it. */
-extern plc_type_t session_plc_type(ab_session_p session, int32_t *identify_rc);
+/* The PLC type, AB_PLC_NONE while identify runs; *refused_rc is set when the PLC refused the session. */
+extern plc_type_t session_plc_type(ab_session_p session, int32_t *refused_rc);
 
 #endif

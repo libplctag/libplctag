@@ -43,7 +43,6 @@
 #include <libplctag/lib/version.h>
 #include <libplctag/protocols/ab/ab.h>
 #include <libplctag/protocols/mb/modbus.h>
-#include <libplctag/protocols/omron/omron.h>
 #include <limits.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -97,7 +96,7 @@ static lock_t instance_lock = LOCK_INIT;
 static lib_instance_p current_instance = NULL;
 
 /* Staging for an instance between lib_init() building it and initialize_modules()
- * either publishing it (lib_instance_publish(), once ab_init()/mb_init()/omron_init()
+ * either publishing it (lib_instance_publish(), once ab_init()/mb_init()
  * have also succeeded) or discarding it (lib_instance_discard_pending(), if one of
  * those fails). Not protected by instance_lock: only initialize_modules() touches
  * it, and only while it is the sole thread inside the library's startup CAS. */
@@ -286,7 +285,7 @@ void lib_instance_publish(void) {
  *
  * Builds the tag hashtable, its lookup mutex, and the tag tickler condition
  * variable, and stages the result in building_instance for initialize_modules()
- * to either publish (lib_instance_publish(), once ab_init()/mb_init()/omron_init()
+ * to either publish (lib_instance_publish(), once ab_init()/mb_init()
  * have also succeeded) or discard (lib_instance_discard_pending(), if one of them
  * fails). Deliberately does not start the tickler thread -- see the comment on
  * lib_instance_publish() above.
@@ -863,6 +862,12 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
         tag->read_cache_expire = (uint64_t)0;
         tag->abort_count++;
 
+        /* an abort before the create ended fails the create for good. */
+        if(!tag->create_done) {
+            tag->create_done = true;
+            tag->create_result = PLCTAG_ERR_ABORT;
+        }
+
         /* Is the abort flag still set? This may be synchronous. */
         if(atomic_get_bool(&tag->abort_requested)) {
             /* Clear the abort flag so the tickler won't process it again */
@@ -966,6 +971,9 @@ static int plc_tag_status_impl(plc_tag_p tag) {
         } else {
             rc = PLCTAG_ERR_NOT_IMPLEMENTED;
         }
+
+        /* a failed create stays failed, whatever the tag does afterwards. */
+        if(tag->create_done && tag->create_result != PLCTAG_STATUS_OK) { rc = tag->create_result; }
 
         if(rc == PLCTAG_STATUS_OK) {
             if(tag->read_in_flight || tag->write_in_flight) {
@@ -1260,9 +1268,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
             case TAG_PROTOCOL_AB_CONNECTION: tag_constructor = ab_tag_create; break;
-
-            case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
-            case TAG_PROTOCOL_OMRON_CONNECTION: tag_constructor = omron_tag_create; break;
 
             case TAG_PROTOCOL_MODBUS:
             case TAG_PROTOCOL_MB_CONNECTION: tag_constructor = mb_tag_create; break;
@@ -1590,7 +1595,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
 
     /* Join the tag tickler thread now, before the protocol modules are torn down:
      * the tickler calls into protocol vtable functions for every active tag, so it
-     * must not still be running once ab_teardown()/mb_teardown()/omron_teardown()
+     * must not still be running once ab_teardown()/mb_teardown()
      * (called from destroy_modules() below) start freeing protocol-level globals. */
     if(inst->tag_tickler_thread) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Waiting for tag tickler thread to exit.");
@@ -2130,6 +2135,12 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             break;
         }
 
+        if(tag->create_done && tag->create_result != PLCTAG_STATUS_OK) {
+            rc = tag->create_result;
+            is_done = 1;
+            break;
+        }
+
         if(tag->read_in_flight || tag->write_in_flight) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "An operation is already in flight!");
             rc = PLCTAG_ERR_BUSY;
@@ -2366,6 +2377,12 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
 
     critical_block(&tag->api_mutex) {
         tag->last_activity_ms = time_ms();
+
+        if(tag->create_done && tag->create_result != PLCTAG_STATUS_OK) {
+            rc = tag->create_result;
+            is_done = 1;
+            break;
+        }
 
         if(tag->read_in_flight || tag->write_in_flight) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");

@@ -175,6 +175,9 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done");
 
+    /* nothing to read from a PLC, so the create ends here. */
+    if(tag->status == PLCTAG_STATUS_OK) { tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK); }
+
     return (plc_tag_p)tag;
 }
 

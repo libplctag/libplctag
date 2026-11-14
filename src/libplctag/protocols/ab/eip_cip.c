@@ -175,6 +175,28 @@ tag_byte_order_t logix_tag_byte_order = {.is_allocated = 0,
                                          .str_pad_bytes = 2};
 
 
+/* Omron NJ/NX strings: a 2-byte count, then the characters, zero terminated. */
+tag_byte_order_t omron_tag_byte_order = {.is_allocated = 0,
+
+                                         .int16_order = {0, 1},
+                                         .int32_order = {0, 1, 2, 3},
+                                         .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+                                         .float32_order = {0, 1, 2, 3},
+                                         .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+
+                                         .str_is_defined = 1,
+                                         .str_is_counted = 1,
+                                         .str_is_fixed_length = 0,
+                                         .str_is_zero_terminated = 1,
+                                         .str_is_byte_swapped = 0,
+
+                                         .str_pad_to_multiple_bytes = 1,
+                                         .str_count_word_bytes = 2,
+                                         .str_max_capacity = 0,
+                                         .str_total_length = 0,
+                                         .str_pad_bytes = 0};
+
+
 tag_byte_order_t logix_tag_listing_byte_order = {.is_allocated = 0,
 
                                                  .int16_order = {0, 1},
@@ -379,7 +401,8 @@ int build_read_request(ab_tag_p tag, int byte_offset) {
      * uint16_t # of elements to read
      */
 
-    read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
+    /* without the fragmented service the whole tag comes back in one reply or not at all. */
+    read_cmd = ab_plc_type_get(tag->plc_type)->fragmented ? AB_EIP_CMD_CIP_READ_FRAG : AB_EIP_CMD_CIP_READ;
 
     *data = read_cmd;
     data++;
@@ -603,10 +626,11 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
 
     if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
 
-    // if(multiple_requests && tag->plc_type == AB_PLC_OMRON_NJNX) {
-    //     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Tag too large for unfragmented request on Omron PLC!");
-    //     return PLCTAG_ERR_TOO_LARGE;
-    // }
+    if(multiple_requests && !ab_plc_type_get(tag->plc_type)->fragmented) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Tag too large for one write and this PLC has no fragmented write!");
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
 
     /* the session writes the EIP and CPF framing; this is only the CIP request. */
@@ -750,7 +774,9 @@ static int check_read_status(ab_tag_p tag) {
             break;
         }
 
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+        /* a partial reply to a plain read cannot be continued, so it is the error it says it is. */
+        if(cip_resp->status != AB_CIP_STATUS_OK
+           && (cip_resp->status != AB_CIP_STATUS_FRAG || !ab_plc_type_get(tag->plc_type)->fragmented)) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,

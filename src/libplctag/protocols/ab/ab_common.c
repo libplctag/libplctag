@@ -48,10 +48,10 @@
 #include <libplctag/protocols/ab/eip_plc5_pccc.h>
 #include <libplctag/protocols/ab/eip_slc_dhp.h>
 #include <libplctag/protocols/ab/eip_slc_pccc.h>
+#include <libplctag/protocols/ab/omron_listing.h>
 #include <libplctag/protocols/ab/pccc.h>
 #include <libplctag/protocols/ab/session.h>
 #include <libplctag/protocols/ab/tag.h>
-#include <libplctag/protocols/omron/omron.h>
 #include <limits.h>
 #include <platform.h>
 #include <utils/attr.h>
@@ -198,7 +198,7 @@ static const char *const lgx_aliases[] = {"ControlLogix", "compactlogix", "clgx"
 static const char *const omron_aliases[] = {"omron-njnx", "omron-nj", "omron-nx", "njnx", "nx1p2", NULL};
 static const char *const generic_aliases[] = {"generic", "cip", NULL};
 
-/* The first alias is how the plc attribute reads back.  Omron tags are made by the Omron module. */
+/* The first alias is how the plc attribute reads back. */
 static const ab_plc_type_t plc_types[] = {
     {.id = AB_PLC_PLC5, .name = "PLC/5", .aliases = plc5_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
      .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .tag_create = pccc_plc_tag_create},
@@ -210,13 +210,17 @@ static const ab_plc_type_t plc_types[] = {
      .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_MICRO800, .name = "Micro800", .aliases = micro800_aliases, .max_msg_size = MAX_CIP_MICRO800_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_MICRO800_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_MICRO800_MSG_SIZE_EX,
-     .only_use_old_forward_open = true, .connected = 1, .tag_create = cip_plc_tag_create},
+     .only_use_old_forward_open = true, .connected = 1, .fragmented = true, .tag_create = cip_plc_tag_create},
     {.id = AB_PLC_LGX, .name = "Logix", .aliases = lgx_aliases, .max_msg_size = MAX_CIP_LGX_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_LGX_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .connected = -1,
-     .allow_packing = true, .needs_path = true, .tag_create = cip_plc_tag_create},
-    {.id = AB_PLC_OMRON_NJNX, .name = "Omron NJ/NX", .aliases = omron_aliases},
+     .allow_packing = true, .needs_path = true, .fragmented = true, .tag_create = cip_plc_tag_create},
+    /* ponytail: Omron never packs; the old module's allow_packing=1 opt-in is gone until someone needs it. */
+    {.id = AB_PLC_OMRON_NJNX, .name = "Omron NJ/NX", .aliases = omron_aliases, .max_msg_size = MAX_CIP_OMRON_MSG_SIZE_EX,
+     .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .connected = 1, .needs_path = true,
+     .tag_create = cip_plc_tag_create},
     {.id = AB_PLC_GENERIC, .name = "generic CIP", .aliases = generic_aliases, .max_msg_size = MAX_CIP_LGX_MSG_SIZE_EX,
-     .fo_conn_size = MAX_CIP_LGX_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .tag_create = cip_plc_tag_create},
+     .fo_conn_size = MAX_CIP_LGX_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .fragmented = true,
+     .tag_create = cip_plc_tag_create},
 };
 
 
@@ -328,9 +332,6 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Starting.");
 
-    /* short circuit for split Omron*/
-    if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata, src_tag); }
-
     /* short circuit for device tag */
     if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
         return (plc_tag_p)ab_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
@@ -375,8 +376,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     if(src_tag) {
         switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: {
+            case TAG_PROTOCOL_AB: {
                 ab_tag_p src = (ab_tag_p)src_tag;
                 tag->plc_type = src->plc_type;
                 break;
@@ -432,8 +432,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
     if(src_tag) {
         switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: {
+            case TAG_PROTOCOL_AB: {
                 ab_tag_p src = (ab_tag_p)src_tag;
                 tag->session = rc_inc(src->session);
                 break;
@@ -464,13 +463,13 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->session);
 
     if(!plc) {
-        int32_t identify_rc = PLCTAG_STATUS_OK;
-        plc_type_t plc_type = session_plc_type(tag->session, &identify_rc);
+        int32_t refused_rc = PLCTAG_STATUS_OK;
+        plc_type_t plc_type = session_plc_type(tag->session, &refused_rc);
 
         if(plc_type != AB_PLC_NONE) {
             rc = finish_identified_tag(tag, attribs, plc_type);
-        } else if(identify_rc != PLCTAG_STATUS_OK) {
-            rc = identify_rc;
+        } else if(refused_rc != PLCTAG_STATUS_OK) {
+            rc = refused_rc;
         } else {
             /* wait for identify.  A byte order for overrides to start from until the PLC type sets one. */
             tag->deferred_attribs = attr_copy(attribs);
@@ -565,7 +564,9 @@ int cip_plc_tag_create(ab_tag_p tag, attr attribs, bool from_src) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(!tag->byte_order) { tag->byte_order = &logix_tag_byte_order; }
+    if(!tag->byte_order) {
+        tag->byte_order = (tag->plc_type == AB_PLC_OMRON_NJNX) ? &omron_tag_byte_order : &logix_tag_byte_order;
+    }
 
     /* a special tag set its own vtable; generic CIP only has special tags. */
     if((tag->vtable == &default_vtable || !tag->vtable) && tag->plc_type != AB_PLC_GENERIC) { tag->vtable = &eip_cip_vtable; }
@@ -622,6 +623,13 @@ int finish_tag_create(ab_tag_p tag, attr attribs, bool sized) {
             return PLCTAG_ERR_NO_MEM;
         }
     } else {
+        /* the CIP read and write services carry the element count in two bytes. */
+        if(tag->elem_count > UINT16_MAX) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Element count must be no more than %d, was %d!", UINT16_MAX,
+                   tag->elem_count);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
         /* filled in by the first read. */
         tag->size = 0;
         tag->data = NULL;
@@ -632,7 +640,8 @@ int finish_tag_create(ab_tag_p tag, attr attribs, bool sized) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(!tag->special_tag && tag->vtable->read && tag->first_read) {
+    /* @udt reads its definition at create, so a UDT the PLC does not have fails the create. */
+    if((!tag->special_tag || tag->elem_type == AB_TYPE_TAG_UDT) && tag->vtable->read && tag->first_read) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Kicking off initial read.");
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
@@ -688,7 +697,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
 
         case AB_PLC_LGX:
         case AB_PLC_MICRO800:
-            // case AB_PLC_OMRON_NJNX:
+        case AB_PLC_OMRON_NJNX:
             /* look for the elem_type attribute. */
             elem_type = attr_get_str(attribs, "elem_type", NULL);
             if(elem_type) {
@@ -745,7 +754,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                  */
                 int elem_size = attr_get_int(attribs, "elem_size", 0);
                 int cip_plc =
-                    !!(tag->plc_type == AB_PLC_LGX || tag->plc_type == AB_PLC_MICRO800 /*|| tag->plc_type == AB_PLC_OMRON_NJNX*/);
+                    !!(tag->plc_type == AB_PLC_LGX || tag->plc_type == AB_PLC_MICRO800 || tag->plc_type == AB_PLC_OMRON_NJNX);
 
                 if(cip_plc) {
                     const char *tmp_tag_name = attr_get_str(attribs, "name", NULL);
@@ -754,6 +763,13 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                     /* check for special tags. */
                     if(str_cmp_i(tmp_tag_name, "@raw") == 0) {
                         special_tag_rc = setup_raw_tag(tag);
+                    } else if(tag->plc_type == AB_PLC_OMRON_NJNX && str_cmp_i(tmp_tag_name, "@tags") == 0) {
+                        special_tag_rc = omron_setup_listing_tag(tag);
+                    } else if(tag->plc_type == AB_PLC_OMRON_NJNX && str_str_cmp_i(tmp_tag_name, "@udt/")) {
+                        special_tag_rc = omron_setup_udt_tag(tag, tmp_tag_name);
+                    } else if(tag->plc_type == AB_PLC_OMRON_NJNX && str_str_cmp_i(tmp_tag_name, "@tags")) {
+                        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Omron has no program tag listing, only @tags!");
+                        special_tag_rc = PLCTAG_ERR_BAD_PARAM;
                     } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
                         special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
                     } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
@@ -843,13 +859,13 @@ int deferred_status(plc_tag_p tag) { return tag->status; }
 /* Runs under the tag's API mutex.  Finishes the tag once identify ends. */
 int deferred_tickler(plc_tag_p p_tag) {
     ab_tag_p tag = (ab_tag_p)p_tag;
-    int32_t identify_rc = PLCTAG_STATUS_OK;
-    plc_type_t plc_type = session_plc_type(tag->session, &identify_rc);
+    int32_t refused_rc = PLCTAG_STATUS_OK;
+    plc_type_t plc_type = session_plc_type(tag->session, &refused_rc);
     int rc = PLCTAG_STATUS_OK;
 
-    if(plc_type == AB_PLC_NONE && identify_rc == PLCTAG_STATUS_OK) { return PLCTAG_STATUS_PENDING; }
+    if(plc_type == AB_PLC_NONE && refused_rc == PLCTAG_STATUS_OK) { return PLCTAG_STATUS_PENDING; }
 
-    rc = (plc_type == AB_PLC_NONE) ? identify_rc : finish_identified_tag(tag, tag->deferred_attribs, plc_type);
+    rc = (plc_type == AB_PLC_NONE) ? refused_rc : finish_identified_tag(tag, tag->deferred_attribs, plc_type);
 
     attr_destroy(tag->deferred_attribs);
     tag->deferred_attribs = NULL;
@@ -1194,7 +1210,8 @@ static int32_t ab_get_elem_type(plc_tag_p raw_tag, int32_t *result) {
         case AB_PLC_LGX_PCCC: *result = (int32_t)(tag->file_type); break;
 
         case AB_PLC_LGX:      /* fall through */
-        case AB_PLC_MICRO800: *result = (int32_t)(tag->elem_type); break;
+        case AB_PLC_MICRO800: /* fall through */
+        case AB_PLC_OMRON_NJNX: *result = (int32_t)(tag->elem_type); break;
 
         default:
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported PLC type %d!", tag->plc_type);
@@ -1211,7 +1228,8 @@ static int32_t ab_get_raw_tag_type_bytes_size(plc_tag_p raw_tag) {
 
     switch(tag->plc_type) {
         case AB_PLC_LGX:      /* fall through */
-        case AB_PLC_MICRO800: return (int32_t)(tag->encoded_type_info_size);
+        case AB_PLC_MICRO800: /* fall through */
+        case AB_PLC_OMRON_NJNX: return (int32_t)(tag->encoded_type_info_size);
 
         default:
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported PLC type %d!", tag->plc_type);
@@ -1494,7 +1512,7 @@ int check_tag_name(ab_tag_p tag, const char *name) {
 
         case AB_PLC_MICRO800:
         case AB_PLC_LGX:
-            // case AB_PLC_OMRON_NJNX:
+        case AB_PLC_OMRON_NJNX:
             if((rc = cip_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "parse of CIP-style tag name %s failed!", name);
 
@@ -1609,6 +1627,14 @@ int check_request_status(ab_tag_p tag) {
     if(rc_is_error(rc)) {
         /* the request is dead, from session side. */
         ab_tag_abort(tag);
+
+        /* the create's own read failed, so the create did. */
+        if(tag->first_read) {
+            tag->first_read = 0;
+            tag->status = (int8_t)rc;
+            tag->read_complete = 1;
+            tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+        }
 
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, tag->tag_id, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }

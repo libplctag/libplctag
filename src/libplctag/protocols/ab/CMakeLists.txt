@@ -26,6 +26,8 @@ set(AB_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/eip_slc_pccc.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/error_codes.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/error_codes.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/omron_listing.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/omron_listing.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/pccc.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/pccc.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/session.c"

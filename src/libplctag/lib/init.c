@@ -36,7 +36,6 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab.h>
 #include <libplctag/protocols/mb/modbus.h>
-#include <libplctag/protocols/omron/omron.h>
 #include <libplctag/protocols/system/system.h>
 #include <utils/rc.h>
 #include <platform.h>
@@ -173,9 +172,6 @@ void destroy_modules(void) {
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
     mb_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
-    omron_teardown();
-
     /* Drain deferred destructors (refcount cleanup) BEFORE tearing down the library
      * module: those destructors run tag teardown that touches the tag table, lookup
      * mutex and tickler condvar which lib_teardown() destroys, so the refcount cleanup
@@ -293,15 +289,6 @@ int initialize_modules(void) {
     rc = mb_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Modbus module!");
-        lib_instance_discard_pending();
-        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Omron module.");
-    rc = omron_init();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Omron module!");
         lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
