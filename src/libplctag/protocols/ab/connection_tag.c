@@ -45,7 +45,7 @@
 
 typedef struct ab_connection_tag_s {
     TAG_BASE_STRUCT;
-    ab_session_p session;
+    cip_conn_p session;
     int32_t use_connected_msg;    /* sets up a CIP connection with Forward Open if set */
     int32_t last_conn_state;      /* previous value; used to detect changes */
     int32_t io_events;            /* 1 = fire READ/WRITE events for session IO, 0 = suppress */

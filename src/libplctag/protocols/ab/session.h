@@ -83,6 +83,10 @@
 #    define SESSION_CONN_STATUS_RING_SIZE_MASK (SESSION_CONN_STATUS_RING_SIZE - 1)
 
 
+/* a connection's state machine; the state it keeps is private to session.c. */
+struct session_sm_s;
+typedef void (*cip_conn_step_func)(cip_conn_p conn, struct session_sm_s *sm);
+
 typedef struct session_conn_status_entry_s {
     int32_t event_type;
     int32_t status;
@@ -90,7 +94,7 @@ typedef struct session_conn_status_entry_s {
 } session_conn_status_entry_t;
 
 
-struct ab_session_t {
+struct cip_conn_t {
     //    int status;
     int on_list;
 
@@ -115,6 +119,9 @@ struct ab_session_t {
 
     /* AB_PLC_NONE until identify picks it when no plc= was given.  Under session_mutex. */
     plc_type_t plc_type;
+
+    /* the PLC type's state machine, set by its setup_conn.  Handler thread only after create. */
+    cip_conn_step_func step;
 
     /* why the PLC refused this session for good (identify or the route), or OK.  Under session_mutex. */
     int32_t refused_rc;
@@ -210,6 +217,13 @@ struct ab_request_t {
 
     /* allow requests to be packed in the session */
     int allow_packing;
+
+    /*
+     * The CIP reply this request expects, header included, or 0 when unknown.  Only a PLC
+     * without the fragmented services needs it: its reply cannot be cut short and continued,
+     * so a packed request must leave room for every reply too.
+     */
+    int reply_size;
     int packing_num;
 
     /* time stamp for debugging output */
@@ -222,19 +236,24 @@ struct ab_request_t {
 };
 
 
-uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
-uint64_t session_get_new_seq_id(ab_session_p sess);
+uint64_t session_get_new_seq_id_unsafe(cip_conn_p sess);
+uint64_t session_get_new_seq_id(cip_conn_p sess);
 
 extern int session_startup(void);
 extern void session_teardown(void);
 
-extern int session_find_or_create(ab_session_p *session, attr attribs, int *is_new_session);
-extern int session_get_max_payload(ab_session_p session);
-extern int session_get_available_cip_payload_space(ab_session_p session);
-extern int session_create_request(ab_session_p session, int tag_id, ab_request_p *request);
-extern int session_add_request(ab_session_p sess, ab_request_p req);
+extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new_session);
+extern int session_get_max_payload(cip_conn_p session);
+extern int session_get_available_cip_payload_space(cip_conn_p session);
+extern int session_create_request(cip_conn_p session, int tag_id, ab_request_p *request);
+extern int session_add_request(cip_conn_p sess, ab_request_p req);
+
+/* Each PLC type's setup_conn: installs its state machine. */
+extern void session_setup_generic(cip_conn_p conn);
+extern void session_setup_logix(cip_conn_p conn);
+extern void session_setup_pccc(cip_conn_p conn);
 
 /* The PLC type, AB_PLC_NONE while identify runs; *refused_rc is set when the PLC refused the session. */
-extern plc_type_t session_plc_type(ab_session_p session, int32_t *refused_rc);
+extern plc_type_t session_plc_type(cip_conn_p session, int32_t *refused_rc);
 
 #endif

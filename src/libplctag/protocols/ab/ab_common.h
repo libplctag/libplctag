@@ -42,8 +42,8 @@
 typedef struct ab_tag_t *ab_tag_p;
 #define AB_TAG_NULL ((ab_tag_p)NULL)
 
-typedef struct ab_session_t *ab_session_p;
-#define AB_SESSION_NULL ((ab_session_p)NULL)
+typedef struct cip_conn_t *cip_conn_p;
+#define CIP_CONN_NULL ((cip_conn_p)NULL)
 
 typedef struct ab_request_t *ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
@@ -100,7 +100,7 @@ extern const attr_def_t ab_attribs[];
  * One entry per PLC type: what its session needs and the tag constructor that finishes a tag
  * once the session exists.  plc= or cpu= picks the entry by one of its aliases.
  */
-typedef struct ab_plc_type_t {
+typedef struct cip_plc_type_t {
     plc_type_t id;
     const char *name;
     const char *const *aliases; /* NULL terminated */
@@ -117,12 +117,15 @@ typedef struct ab_plc_type_t {
     bool needs_path;
     bool fragmented; /* has Read and Write Tag Fragmented (0x52, 0x53). */
 
+    /* installs this type's connection state machine once the type is known. */
+    void (*setup_conn)(cip_conn_p conn);
+
     /* the PLC-specific half of creating a tag.  from_src is set by plc_tag_create_from_tag(). */
     int (*tag_create)(ab_tag_p tag, attr attribs, bool from_src);
-} ab_plc_type_t;
+} cip_plc_type_t;
 
-extern const ab_plc_type_t *ab_plc_type_find(attr attribs);
-extern const ab_plc_type_t *ab_plc_type_get(plc_type_t id);
+extern const cip_plc_type_t *ab_plc_type_find(attr attribs);
+extern const cip_plc_type_t *ab_plc_type_get(plc_type_t id);
 extern plc_type_t get_plc_type(attr attribs);
 
 /* The PLC type an Identity reply names, or an error when the device is not a CPU we can use. */

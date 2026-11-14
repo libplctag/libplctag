@@ -61,14 +61,14 @@
 /* Minimal view of AB device-tag layout needed for source-session sharing. */
 typedef struct ab_connection_tag_view_s {
     TAG_BASE_STRUCT;
-    ab_session_p session;
+    cip_conn_p session;
 } ab_connection_tag_view_t;
 
 /*
  * Externally visible global variables
  */
 
-// volatile ab_session_p sessions = NULL;
+// volatile cip_conn_p sessions = NULL;
 // volatile mutex_p global_session_mut = NULL;
 //
 // volatile vector_p read_group_tags = NULL;
@@ -199,33 +199,34 @@ static const char *const omron_aliases[] = {"omron-njnx", "omron-nj", "omron-nx"
 static const char *const generic_aliases[] = {"generic", "cip", NULL};
 
 /* The first alias is how the plc attribute reads back. */
-static const ab_plc_type_t plc_types[] = {
+static const cip_plc_type_t plc_types[] = {
     {.id = AB_PLC_PLC5, .name = "PLC/5", .aliases = plc5_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
-     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .tag_create = pccc_plc_tag_create},
+     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .setup_conn = session_setup_pccc, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_SLC, .name = "SLC 500", .aliases = slc_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
-     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .tag_create = pccc_plc_tag_create},
+     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .setup_conn = session_setup_pccc, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_MLGX, .name = "MicroLogix", .aliases = mlgx_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
-     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .tag_create = pccc_plc_tag_create},
+     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .setup_conn = session_setup_pccc, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_LGX_PCCC, .name = "Logix PCCC", .aliases = lgx_pccc_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
-     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .tag_create = pccc_plc_tag_create},
+     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .only_use_old_forward_open = true, .setup_conn = session_setup_pccc, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_MICRO800, .name = "Micro800", .aliases = micro800_aliases, .max_msg_size = MAX_CIP_MICRO800_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_MICRO800_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_MICRO800_MSG_SIZE_EX,
-     .only_use_old_forward_open = true, .connected = 1, .fragmented = true, .tag_create = cip_plc_tag_create},
+     .only_use_old_forward_open = true, .connected = 1, .fragmented = true, .setup_conn = session_setup_generic, .tag_create = cip_plc_tag_create},
     {.id = AB_PLC_LGX, .name = "Logix", .aliases = lgx_aliases, .max_msg_size = MAX_CIP_LGX_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_LGX_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .connected = -1,
-     .allow_packing = true, .needs_path = true, .fragmented = true, .tag_create = cip_plc_tag_create},
-    /* ponytail: Omron never packs; the old module's allow_packing=1 opt-in is gone until someone needs it. */
-    {.id = AB_PLC_OMRON_NJNX, .name = "Omron NJ/NX", .aliases = omron_aliases, .max_msg_size = MAX_CIP_OMRON_MSG_SIZE_EX,
-     .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .connected = 1, .needs_path = true,
+     .allow_packing = true, .needs_path = true, .fragmented = true, .setup_conn = session_setup_logix,
      .tag_create = cip_plc_tag_create},
+    /* Omron packs only requests whose reply size is known; see ab_request_t's reply_size. */
+    {.id = AB_PLC_OMRON_NJNX, .name = "Omron NJ/NX", .aliases = omron_aliases, .max_msg_size = MAX_CIP_OMRON_MSG_SIZE_EX,
+     .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .connected = 1, .allow_packing = true,
+     .needs_path = true, .setup_conn = session_setup_generic, .tag_create = cip_plc_tag_create},
     {.id = AB_PLC_GENERIC, .name = "generic CIP", .aliases = generic_aliases, .max_msg_size = MAX_CIP_LGX_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_LGX_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .fragmented = true,
-     .tag_create = cip_plc_tag_create},
+     .setup_conn = session_setup_generic, .tag_create = cip_plc_tag_create},
 };
 
 
 /* The PLC type the tag string names with plc= or cpu=, or NULL. */
-const ab_plc_type_t *ab_plc_type_find(attr attribs) {
+const cip_plc_type_t *ab_plc_type_find(attr attribs) {
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", NULL));
 
     if(!cpu_type) { return NULL; }
@@ -242,7 +243,7 @@ const ab_plc_type_t *ab_plc_type_find(attr attribs) {
 }
 
 
-const ab_plc_type_t *ab_plc_type_get(plc_type_t id) {
+const cip_plc_type_t *ab_plc_type_get(plc_type_t id) {
     for(size_t i = 0; i < sizeof(plc_types) / sizeof(plc_types[0]); i++) {
         if(plc_types[i].id == id) { return &plc_types[i]; }
     }
@@ -252,7 +253,7 @@ const ab_plc_type_t *ab_plc_type_get(plc_type_t id) {
 
 
 plc_type_t get_plc_type(attr attribs) {
-    const ab_plc_type_t *plc = ab_plc_type_find(attribs);
+    const cip_plc_type_t *plc = ab_plc_type_find(attribs);
 
     return plc ? plc->id : AB_PLC_NONE;
 }
@@ -327,7 +328,7 @@ int ab_plc_type_from_identity(uint16_t vendor_id, const char *product_name, bool
 plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                         void *userdata, plc_tag_p src_tag) {
     ab_tag_p tag = AB_TAG_NULL;
-    const ab_plc_type_t *plc = NULL;
+    const cip_plc_type_t *plc = NULL;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Starting.");
@@ -550,7 +551,7 @@ int pccc_plc_tag_create(ab_tag_p tag, attr attribs, bool from_src) {
 
 /* Logix, Micro800 and generic CIP: symbolic tags, sized by the first read. */
 int cip_plc_tag_create(ab_tag_p tag, attr attribs, bool from_src) {
-    const ab_plc_type_t *plc = ab_plc_type_get(tag->plc_type);
+    const cip_plc_type_t *plc = ab_plc_type_get(tag->plc_type);
     int rc = get_tag_data_type(tag, attribs);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -821,7 +822,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
  * ponytail: byte-order overrides on such a tag start from the Logix defaults, not the PLC type's.
  */
 int finish_identified_tag(ab_tag_p tag, attr attribs, plc_type_t plc_type) {
-    const ab_plc_type_t *plc = ab_plc_type_get(plc_type);
+    const cip_plc_type_t *plc = ab_plc_type_get(plc_type);
 
     if(!plc || !plc->tag_create) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "The identified PLC type is not supported here!");
@@ -1061,7 +1062,7 @@ int ab_tag_status(ab_tag_p tag) {
  */
 
 void ab_tag_destroy(ab_tag_p tag) {
-    ab_session_p session = NULL;
+    cip_conn_p session = NULL;
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, tag ? tag->tag_id : 0, "Starting.");
 
@@ -1270,7 +1271,7 @@ static int32_t ab_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, int
 
 /* The PLC type as the tag string spells it, so plc_type_t stays private. */
 static const char *ab_plc_type_name(plc_type_t plc_type) {
-    const ab_plc_type_t *plc = ab_plc_type_get(plc_type);
+    const cip_plc_type_t *plc = ab_plc_type_get(plc_type);
 
     return plc ? plc->aliases[0] : NULL;
 }

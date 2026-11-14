@@ -114,48 +114,50 @@ static uint8_t cip_router_path[] = {0x20, 0x02, 0x24, 0x01};
 
 /* plc-specific session constructors */
 
-static ab_session_p session_create_unsafe(int max_payload_capacity, const char *host,
+static cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host,
                                           const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
-static int add_session_unsafe(ab_session_p n);
-static int remove_session_unsafe(ab_session_p n);
-static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
-static int session_match_valid(const char *host, const char *path, ab_session_p session);
-// static int session_add_request_unsafe(ab_session_p session, ab_request_p req);
-static int session_open_socket(ab_session_p session);
+static int add_session_unsafe(cip_conn_p n);
+static int remove_session_unsafe(cip_conn_p n);
+static cip_conn_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
+static int session_match_valid(const char *host, const char *path, cip_conn_p session);
+// static int session_add_request_unsafe(cip_conn_p session, ab_request_p req);
+static int session_open_socket(cip_conn_p session);
 static void session_destroy(void *session);
-static int session_register(ab_session_p session);
-static int session_identify(ab_session_p session);
-static int session_close_socket(ab_session_p session);
-static int session_unregister(ab_session_p session);
+static int session_register(cip_conn_p session);
+static int session_identify(cip_conn_p session);
+static int session_close_socket(cip_conn_p session);
+static int session_unregister(cip_conn_p session);
 static THREAD_FUNC(session_handler);
-static int purge_aborted_requests_unsafe(ab_session_p session);
-static int process_requests(ab_session_p session);
-// static int check_packing(ab_session_p session, ab_request_p request);
-static int get_payload_size(ab_session_p session, ab_request_p request);
-static int frame_cip_request(ab_session_p session, ab_request_p request);
-static int check_response_framing(ab_session_p session);
-static int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests);
-static int prepare_request(ab_session_p session);
-static int send_eip_request(ab_session_p session, int timeout);
-static int recv_eip_response(ab_session_p session, int timeout);
-static int unpack_response(ab_session_p session, ab_request_p request, int sub_packet, int num_packed);
-// static int perform_forward_open(ab_session_p session);
-static int perform_forward_close(ab_session_p session);
-// static int try_forward_open_ex(ab_session_p session, int *max_payload_size_guess);
-// static int try_forward_open(ab_session_p session);
-// static int send_forward_open_req(ab_session_p session);
-// static int send_forward_open_req_ex(ab_session_p session);
-// static int recv_forward_open_resp(ab_session_p session, int *max_payload_size_guess);
-static int send_forward_close_req(ab_session_p session);
-static int recv_forward_close_resp(ab_session_p session);
-static int send_forward_open_request(ab_session_p session);
+static int purge_aborted_requests_unsafe(cip_conn_p session);
+static int process_requests(cip_conn_p session);
+// static int check_packing(cip_conn_p session, ab_request_p request);
+static int get_payload_size(cip_conn_p session, ab_request_p request);
+static int frame_cip_request(cip_conn_p session, ab_request_p request);
+static int check_response_framing(cip_conn_p session);
+static int pack_requests(cip_conn_p session, ab_request_p *requests, int num_requests);
+static int prepare_request(cip_conn_p session);
+static int send_eip_request(cip_conn_p session, int timeout);
+static int recv_eip_response(cip_conn_p session, int timeout);
+static int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, int num_packed);
+// static int perform_forward_open(cip_conn_p session);
+static int perform_forward_close(cip_conn_p session);
+// static int try_forward_open_ex(cip_conn_p session, int *max_payload_size_guess);
+// static int try_forward_open(cip_conn_p session);
+// static int send_forward_open_req(cip_conn_p session);
+// static int send_forward_open_req_ex(cip_conn_p session);
+// static int recv_forward_open_resp(cip_conn_p session, int *max_payload_size_guess);
+static int send_forward_close_req(cip_conn_p session);
+static int recv_forward_close_resp(cip_conn_p session);
+static int send_forward_open_request(cip_conn_p session);
 static uint16_t next_conn_serial_number(uint16_t current);
-static int send_old_forward_open_request(ab_session_p session);
-static int send_extended_forward_open_request(ab_session_p session);
-static int receive_forward_open_response(ab_session_p session);
+static int send_old_forward_open_request(cip_conn_p session);
+static int send_extended_forward_open_request(cip_conn_p session);
+static int receive_forward_open_response(cip_conn_p session);
 static void request_destroy(void *req_arg);
 static int session_request_increase_buffer(ab_request_p request, int new_capacity);
-static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason);
+static inline void session_publish_event(cip_conn_p session, int32_t event_type, int32_t status, int32_t reason);
+static void generic_step(cip_conn_p session, struct session_sm_s *sm);
+static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc);
 
 
 static mutex_t session_mutex;
@@ -202,7 +204,7 @@ void session_teardown(void) {
             remaining_sessions = vector_length(sessions);
 
             for(int sess_index = 0; sess_index < remaining_sessions; sess_index++) {
-                ab_session_p session = vector_get(sessions, sess_index);
+                cip_conn_p session = vector_get(sessions, sess_index);
 
                 if(session) { atomic_set_int32(&session->terminating, 1); }
             }
@@ -276,7 +278,7 @@ void session_teardown(void) {
  * integer as an atomic entity.
  */
 
-uint64_t session_get_new_seq_id_unsafe(ab_session_p session) { return session->session_seq_id++; }
+uint64_t session_get_new_seq_id_unsafe(cip_conn_p session) { return session->session_seq_id++; }
 
 /*
  * session_get_new_seq_id
@@ -284,7 +286,7 @@ uint64_t session_get_new_seq_id_unsafe(ab_session_p session) { return session->s
  * A thread-safe function to get a new session sequence ID.
  */
 
-uint64_t session_get_new_seq_id(ab_session_p session) {
+uint64_t session_get_new_seq_id(cip_conn_p session) {
     uint16_t res = 0;
 
     spin_block(&session->session_seq_id_lock) {
@@ -297,7 +299,7 @@ uint64_t session_get_new_seq_id(ab_session_p session) {
 }
 
 
-int session_get_max_payload(ab_session_p session) {
+int session_get_max_payload(cip_conn_p session) {
     int result = 0;
 
     if(!session) {
@@ -312,7 +314,7 @@ int session_get_max_payload(ab_session_p session) {
     return result;
 }
 
-int session_get_available_cip_payload_space(ab_session_p session) {
+int session_get_available_cip_payload_space(cip_conn_p session) {
     int result = 0;
 
     if(!session) {
@@ -347,14 +349,14 @@ int session_get_available_cip_payload_space(ab_session_p session) {
     return result;
 }
 
-int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_session) {
+int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_session) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
     // int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
-    const ab_plc_type_t *plc = ab_plc_type_find(attribs);
-    ab_session_p session = AB_SESSION_NULL;
+    const cip_plc_type_t *plc = ab_plc_type_find(attribs);
+    cip_conn_p session = CIP_CONN_NULL;
     int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
@@ -395,10 +397,10 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
             session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id);
         } else {
             /* no sharing, create a new one */
-            session = AB_SESSION_NULL;
+            session = CIP_CONN_NULL;
         }
 
-        if(session == AB_SESSION_NULL) {
+        if(session == CIP_CONN_NULL) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Creating new session.");
 
             if(plc) {
@@ -411,14 +413,9 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
                                                 &use_connected_msg, connection_group_id);
             }
 
-            if(session != AB_SESSION_NULL && plc) {
-                session->only_use_old_forward_open = plc->only_use_old_forward_open;
-                session->fo_conn_size = plc->fo_conn_size;
-                session->fo_ex_conn_size = plc->fo_ex_conn_size;
-                session->max_payload_size = (uint16_t)session->fo_conn_size;
-            }
+            if(session != CIP_CONN_NULL && plc) { session_apply_plc_type(session, plc); }
 
-            if(session == AB_SESSION_NULL) {
+            if(session == CIP_CONN_NULL) {
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
@@ -452,7 +449,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
             rc_dec(session);
-            session = AB_SESSION_NULL;
+            session = CIP_CONN_NULL;
         } else {
             /* save the status */
             // session->status = rc;
@@ -470,7 +467,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
 }
 
 
-int add_session_unsafe(ab_session_p session) {
+int add_session_unsafe(cip_conn_p session) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
 
     if(!session) { return PLCTAG_ERR_NULL_PTR; }
@@ -485,7 +482,7 @@ int add_session_unsafe(ab_session_p session) {
 }
 
 
-int add_session(ab_session_p s) {
+int add_session(cip_conn_p s) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
@@ -498,13 +495,13 @@ int add_session(ab_session_p s) {
 }
 
 
-int remove_session_unsafe(ab_session_p session) {
+int remove_session_unsafe(cip_conn_p session) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
 
     if(!session || !sessions) { return 0; }
 
     for(int i = 0; i < vector_length(sessions); i++) {
-        ab_session_p tmp = vector_get(sessions, i);
+        cip_conn_p tmp = vector_get(sessions, i);
 
         /* FIXME potential ABA problem here */
         if(tmp == session) {
@@ -521,7 +518,7 @@ int remove_session_unsafe(ab_session_p session) {
     return PLCTAG_STATUS_OK;
 }
 
-int remove_session(ab_session_p s) {
+int remove_session(cip_conn_p s) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
@@ -538,7 +535,7 @@ int remove_session(ab_session_p s) {
 }
 
 
-int session_match_valid(const char *host, const char *path, ab_session_p session) {
+int session_match_valid(const char *host, const char *path, cip_conn_p session) {
     if(!session) { return 0; }
 
     if(!str_length(host)) {
@@ -559,9 +556,9 @@ int session_match_valid(const char *host, const char *path, ab_session_p session
 }
 
 
-ab_session_p find_session_by_host_unsafe(const char *host, const char *path, int connection_group_id) {
+cip_conn_p find_session_by_host_unsafe(const char *host, const char *path, int connection_group_id) {
     for(int i = 0; i < vector_length(sessions); i++) {
-        ab_session_p session = vector_get(sessions, i);
+        cip_conn_p session = vector_get(sessions, i);
 
         /* is this session in the process of destruction? */
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_inc: Acquiring session reference.");
@@ -579,12 +576,12 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path, int
 }
 
 
-ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, const char *path,
+cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, const char *path,
                                    plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
     static volatile uint32_t connection_id = 0;
 
     int rc = PLCTAG_STATUS_OK;
-    ab_session_p session = AB_SESSION_NULL;
+    cip_conn_p session = CIP_CONN_NULL;
     size_t total_allocation_size = sizeof(*session);
     size_t data_buffer_capacity = (size_t)EIP_CIP_PREFIX_SIZE + (size_t)max_payload_capacity;
     size_t host_name_offset = 0;
@@ -612,7 +609,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
     if(!host || str_length(host) >= MAX_SESSION_HOST_LEN) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Gateway string is missing or longer than the maximum of %d bytes!",
                MAX_SESSION_HOST_LEN - 1);
-        return AB_SESSION_NULL;
+        return CIP_CONN_NULL;
     }
 
     /*
@@ -623,7 +620,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
      */
     if(path && str_length(path) >= MAX_CONN_PATH) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Path string is longer than the maximum of %d bytes!", MAX_CONN_PATH - 1);
-        return AB_SESSION_NULL;
+        return CIP_CONN_NULL;
     }
 
     if(*use_connected_msg) {
@@ -635,7 +632,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
     if(data_buffer_capacity > SESSION_DATA_CAPACITY) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "A %zu byte packet does not fit the %d byte session buffer!",
                data_buffer_capacity, SESSION_DATA_CAPACITY);
-        return AB_SESSION_NULL;
+        return CIP_CONN_NULL;
     }
 
     /* add in space for the host name.  + 1 for the NUL terminator. */
@@ -680,10 +677,10 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
         total_allocation_size, SESSION_DATA_CAPACITY, str_length(host) + 1,
         (path_offset == 0 ? 0 : str_length(path) + 1), tmp_conn_path_size);
 
-    session = (ab_session_p)rc_alloc((int)total_allocation_size, session_destroy);
+    session = (cip_conn_p)rc_alloc((int)total_allocation_size, session_destroy);
     if(!session) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error allocating new session!");
-        return AB_SESSION_NULL;
+        return CIP_CONN_NULL;
     }
 
     /* fill in the interior pointers */
@@ -730,6 +727,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
 
     /* fix up the rest of teh fields */
     session->plc_type = plc_type;
+    session->step = generic_step;
     session->use_connected_msg = *use_connected_msg;
     session->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     session->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
@@ -790,7 +788,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
  * Connect to the host/port passed via TCP.
  */
 
-int session_open_socket(ab_session_p session) {
+int session_open_socket(cip_conn_p session) {
     int rc = PLCTAG_STATUS_OK;
     char **server_port = NULL;
     int port = 0;
@@ -863,7 +861,7 @@ int session_open_socket(ab_session_p session) {
 }
 
 
-int session_register(ab_session_p session) {
+int session_register(cip_conn_p session) {
     eip_session_reg_req *req;
     eip_encap *resp;
     int rc = PLCTAG_STATUS_OK;
@@ -943,7 +941,7 @@ int session_register(ab_session_p session) {
 }
 
 
-int session_unregister(ab_session_p session) {
+int session_unregister(cip_conn_p session) {
     (void)session;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
@@ -956,7 +954,7 @@ int session_unregister(ab_session_p session) {
 }
 
 
-int session_close_socket(ab_session_p session) {
+int session_close_socket(cip_conn_p session) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
     if(session->sock) {
@@ -972,7 +970,7 @@ int session_close_socket(ab_session_p session) {
 
 
 void session_destroy(void *session_arg) {
-    ab_session_p session = session_arg;
+    cip_conn_p session = session_arg;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
@@ -1081,7 +1079,7 @@ void session_destroy(void *session_arg) {
  *
  * This is a thread-safe version of the above routine.
  */
-int session_add_request(ab_session_p session, ab_request_p req) {
+int session_add_request(cip_conn_p session, ab_request_p req) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", session, req);
@@ -1102,6 +1100,13 @@ int session_add_request(ab_session_p session, ab_request_p req) {
 
         /* only a connected packet carries a Multiple Service Packet here. */
         if(!req->connected) { req->allow_packing = 0; }
+
+        /* without the fragmented services an unbudgeted reply could overflow the packed reply. */
+        {
+            const cip_plc_type_t *plc = ab_plc_type_get(session->plc_type);
+
+            if(plc && !plc->fragmented && req->reply_size <= 0) { req->allow_packing = 0; }
+        }
 
         /* insert into the requests vector */
         vector_set(session->requests, vector_length(session->requests), req);
@@ -1138,7 +1143,7 @@ typedef enum {
 } session_state_t;
 
 /* what a session's state machine keeps between passes of the handler loop. */
-typedef struct {
+typedef struct session_sm_s {
     session_state_t state;
     int64_t now;
     int64_t timeout_time;
@@ -1149,32 +1154,32 @@ typedef struct {
     int auto_disconnect;
 } session_sm_t;
 
-typedef void (*session_step_func)(ab_session_p session, session_sm_t *sm);
-
-static void generic_step(ab_session_p session, session_sm_t *sm);
-static void logix_step(ab_session_p session, session_sm_t *sm);
-static void pccc_step(ab_session_p session, session_sm_t *sm);
+static void generic_step(cip_conn_p session, session_sm_t *sm);
+static void logix_step(cip_conn_p session, session_sm_t *sm);
+static void pccc_step(cip_conn_p session, session_sm_t *sm);
 
 
-/*
- * The state machine for this session's PLC type.  Identify, which runs in the generic machine,
- * is the only thing that changes the type, and it runs on this thread, so no lock is needed.
- */
-static session_step_func session_step(ab_session_p session) {
-    switch(session->plc_type) {
-        case AB_PLC_LGX: return logix_step;
+/* Identify, which runs in the generic machine, is the only later caller, on the handler thread. */
+void session_setup_generic(cip_conn_p conn) { conn->step = generic_step; }
 
-        case AB_PLC_PLC5:
-        case AB_PLC_SLC:
-        case AB_PLC_MLGX: return session->is_dhp ? generic_step : pccc_step;
+void session_setup_logix(cip_conn_p conn) { conn->step = logix_step; }
 
-        default: return generic_step;
-    }
+/* a DH+ route goes through a Logix bridge over a Forward Open, which the generic machine runs. */
+void session_setup_pccc(cip_conn_p conn) { conn->step = conn->is_dhp ? generic_step : pccc_step; }
+
+
+/* copy what the PLC type sets on its connection, then let it install its state machine. */
+static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc) {
+    session->plc_type = plc->id;
+    session->only_use_old_forward_open = plc->only_use_old_forward_open;
+    session->fo_conn_size = plc->fo_conn_size;
+    session->fo_ex_conn_size = plc->fo_ex_conn_size;
+    session->max_payload_size = (uint16_t)session->fo_conn_size;
+    plc->setup_conn(session);
 }
 
 
-
-static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason) {
+static inline void session_publish_event(cip_conn_p session, int32_t event_type, int32_t status, int32_t reason) {
     int32_t write_idx = atomic_get_int32(&session->conn_status_ring_write_idx);
 
     if(session->conn_status_ring[write_idx].event_type == event_type && session->conn_status_ring[write_idx].status == status) {
@@ -1202,7 +1207,7 @@ static inline void session_publish_event(ab_session_p session, int32_t event_typ
  * and connection_status) to seed a freshly created connection tag, and needs the same
  * mutex to avoid reading one from before this transition and the other from after it --
  * see the comment there. */
-static inline void session_set_connection_status(ab_session_p session, int32_t new_status, int32_t new_reason) {
+static inline void session_set_connection_status(cip_conn_p session, int32_t new_status, int32_t new_reason) {
     critical_block(&session->session_mutex) {
         int32_t old_status = atomic_get_int32(&session->connection_status);
         atomic_set_int32(&session->connection_status_reason, new_reason);
@@ -1215,7 +1220,7 @@ static inline void session_set_connection_status(ab_session_p session, int32_t n
 
 
 /* the PLC refused this session for good. */
-static bool session_refused(ab_session_p session) {
+static bool session_refused(cip_conn_p session) {
     bool refused = false;
 
     critical_block(&session->session_mutex) { refused = (session->refused_rc != PLCTAG_STATUS_OK); }
@@ -1225,7 +1230,7 @@ static bool session_refused(ab_session_p session) {
 
 
 /* A refused session answers every request with the refusal, so no tag waits on it. */
-static void fail_queued_requests(ab_session_p session) {
+static void fail_queued_requests(cip_conn_p session) {
     int32_t refused_rc = PLCTAG_STATUS_OK;
     int failed = 0;
 
@@ -1270,7 +1275,7 @@ static const uint16_t forward_open_size_ladder[] = {4002, 1900, 504, 500, 244, 9
  * Drop to the next connection size worth asking for.  False when there is none left.  A size the
  * PLC offers is a ceiling, not an answer: Logix v32 and later has offered 4002 and then refused it.
  */
-static bool forward_open_step_size_down(ab_session_p session) {
+static bool forward_open_step_size_down(cip_conn_p session) {
     uint16_t limit = (session->max_payload_guess > 0 ? (uint16_t)(session->max_payload_guess - 1) : 0);
 
     if(session->fo_offered_size > 0 && session->fo_offered_size < limit) { limit = session->fo_offered_size; }
@@ -1307,7 +1312,7 @@ static bool forward_open_step_size_down(ab_session_p session) {
  * messaging.  Not a link that is offline (0x0800), which maps to the same error but is a PLC
  * down for maintenance, and not running out of sizes, which a PLC still starting up causes.
  */
-static bool forward_open_error_is_configuration(ab_session_p session, int rc) {
+static bool forward_open_error_is_configuration(cip_conn_p session, int rc) {
     if(session->fo_ext_status == CIP_EXT_ERR_LINK_OFFLINE) { return false; }
 
     return (rc == PLCTAG_ERR_BAD_DEVICE || rc == PLCTAG_ERR_BAD_PARAM || rc == PLCTAG_ERR_UNSUPPORTED);
@@ -1315,7 +1320,7 @@ static bool forward_open_error_is_configuration(ab_session_p session, int rc) {
 
 
 /* A reconnect starts the negotiation over, keeping the size the PLC last agreed to. */
-static void forward_open_reset_negotiation(ab_session_p session) {
+static void forward_open_reset_negotiation(cip_conn_p session) {
     session->fo_offered_size = 0;
     session->fo_dup_retries = 0;
     session->fo_ext_status = 0;
@@ -1326,7 +1331,7 @@ static void forward_open_reset_negotiation(ab_session_p session) {
  * After a refused Forward Open: retry inside the session when the request can still change, and
  * otherwise give up on this connect.  Returns the next state.
  */
-static session_state_t forward_open_refused(ab_session_p session, session_sm_t *sm, int rc) {
+static session_state_t forward_open_refused(cip_conn_p session, session_sm_t *sm, int rc) {
     if(rc == PLCTAG_ERR_DUPLICATE) {
         session->fo_dup_retries++;
 
@@ -1382,7 +1387,7 @@ static session_state_t forward_open_refused(ab_session_p session, session_sm_t *
  * Every state, for a session whose PLC type is not known yet and for the PLC types without their own
  * machine (Micro800, PCCC-mapped Logix, PLC/5 and SLC over DH+, generic CIP).  Identify runs here.
  */
-static void generic_step(ab_session_p session, session_sm_t *sm) {
+static void generic_step(cip_conn_p session, session_sm_t *sm) {
     int rc = PLCTAG_STATUS_OK;
 
     switch(sm->state) {
@@ -1742,7 +1747,7 @@ static void generic_step(ab_session_p session, session_sm_t *sm) {
  * ControlLogix and CompactLogix: Forward Open (extended, then the old form if refused), requests over
  * the connection, Forward Close.  An unconnected session goes straight from register to idle.
  */
-static void logix_step(ab_session_p session, session_sm_t *sm) {
+static void logix_step(cip_conn_p session, session_sm_t *sm) {
     int rc = PLCTAG_STATUS_OK;
 
     switch(sm->state) {
@@ -2066,7 +2071,7 @@ static void logix_step(ab_session_p session, session_sm_t *sm) {
  * PLC/5, SLC and MicroLogix reached directly: unconnected, so register, requests, unregister.  No
  * Forward Open and no Forward Close.
  */
-static void pccc_step(ab_session_p session, session_sm_t *sm) {
+static void pccc_step(cip_conn_p session, session_sm_t *sm) {
     int rc = PLCTAG_STATUS_OK;
 
     switch(sm->state) {
@@ -2329,7 +2334,7 @@ static void pccc_step(ab_session_p session, session_sm_t *sm) {
 
 
 THREAD_FUNC(session_handler) {
-    ab_session_p session = arg;
+    cip_conn_p session = arg;
     session_sm_t sm = {.state = SESSION_OPEN_SOCKET_START};
     int64_t wait_until_time = 0;
 
@@ -2359,7 +2364,7 @@ THREAD_FUNC(session_handler) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Critical block.");
         critical_block(&session->session_mutex) { purge_aborted_requests_unsafe(session); }
 
-        session_step(session)(session, &sm);
+        session->step(session, &sm);
 
         /*
          * give up the CPU a bit, but only if we are not
@@ -2391,7 +2396,7 @@ THREAD_FUNC(session_handler) {
 /*
  * This must be called with the session mutex held!
  */
-int purge_aborted_requests_unsafe(ab_session_p session) {
+int purge_aborted_requests_unsafe(cip_conn_p session) {
     int purge_count = 0;
     ab_request_p request = NULL;
 
@@ -2433,7 +2438,7 @@ int purge_aborted_requests_unsafe(ab_session_p session) {
 }
 
 
-int process_requests(ab_session_p session) {
+int process_requests(cip_conn_p session) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p request = NULL;
     ab_request_p bundled_requests[MAX_REQUESTS] = {NULL};
@@ -2499,6 +2504,9 @@ int process_requests(ab_session_p session) {
                 request = vector_get(session->requests, 0);
                 int first_request_size = get_payload_size(session, request);
 
+                /* the replies share one packet too, so they are budgeted the same way. */
+                int remaining_reply_space = remaining_space - request->reply_size;
+
                 /* Check if the first request fits at all */
                 if(first_request_size <= remaining_space) {
                     bundled_requests[num_bundled_requests] = request;
@@ -2510,10 +2518,12 @@ int process_requests(ab_session_p session) {
                     if(request->allow_packing && vector_length(session->requests) > 0) {
                         /* Account for CIP multi-request overhead now that we know we'll have multiple requests */
                         remaining_space -= (int)sizeof(cip_multi_req_header);
+                        remaining_reply_space -= (int)sizeof(cip_multi_resp_header);
 
                         /* Account for 2-byte offset entry per request (including the first one already processed) */
                         int multi_request_overhead = 2;            /* 2-byte offset entry per additional request */
                         remaining_space -= multi_request_overhead; /* for the first request */
+                        remaining_reply_space -= multi_request_overhead;
 
                         while(vector_length(session->requests) > 0 && num_bundled_requests < MAX_REQUESTS) {
 
@@ -2527,9 +2537,15 @@ int process_requests(ab_session_p session) {
                             /* Check if this request fits in remaining space */
                             if(next_request_size > remaining_space) { break; }
 
+                            /* a reply that has to come back whole has to fit too. */
+                            if(request->reply_size > 0 && request->reply_size + multi_request_overhead > remaining_reply_space) {
+                                break;
+                            }
+
                             bundled_requests[num_bundled_requests] = request;
                             num_bundled_requests++;
                             remaining_space -= next_request_size;
+                            remaining_reply_space -= request->reply_size + multi_request_overhead;
                             vector_remove(session->requests, 0);
                         }
                     }
@@ -2783,7 +2799,7 @@ int process_requests(ab_session_p session) {
 }
 
 
-int unpack_response(ab_session_p session, ab_request_p request, int sub_packet, int num_packed) {
+int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, int num_packed) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t *buf_end = session->data + session->data_size;
     size_t reply_offset = 0;
@@ -2916,7 +2932,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet, 
  * Check the EIP and CPF framing of the response in the session buffer: EIP status, CPF items,
  * our connection ID, and a data item length that matches what arrived.
  */
-int check_response_framing(ab_session_p session) {
+int check_response_framing(cip_conn_p session) {
     eip_encap *encap = (eip_encap *)(session->data);
     const char *kind = NULL;
     size_t data_item_start = 0;
@@ -3022,7 +3038,7 @@ int check_response_framing(ab_session_p session) {
  *                              the CIP, then the route path
  *   unconnected, no path       EIP, CPF null address and data items, CIP to the device itself
  */
-int frame_cip_request(ab_session_p session, ab_request_p request) {
+int frame_cip_request(cip_conn_p session, ab_request_p request) {
     size_t header_size = 0;
     size_t total_size = 0;
     uint8_t *cip = NULL;
@@ -3102,7 +3118,7 @@ int frame_cip_request(ab_session_p session, ab_request_p request) {
 }
 
 
-int get_payload_size(ab_session_p session, ab_request_p request) {
+int get_payload_size(cip_conn_p session, ab_request_p request) {
     bool wrapped = false;
 
     if(!request || !request->data || request->request_size <= 0) {
@@ -3117,7 +3133,7 @@ int get_payload_size(ab_session_p session, ab_request_p request) {
 }
 
 
-int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests) {
+int pack_requests(cip_conn_p session, ab_request_p *requests, int num_requests) {
     eip_cip_co_req *packed_req = NULL;
     /* FIXME - is this the right way to check? */
     int header_size = 0;
@@ -3281,7 +3297,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
 }
 
 
-int prepare_request(ab_session_p session) {
+int prepare_request(cip_conn_p session) {
     eip_encap *encap = NULL;
     int payload_size = 0;
 
@@ -3343,7 +3359,7 @@ int prepare_request(ab_session_p session) {
 }
 
 
-int send_eip_request(ab_session_p session, int timeout) {
+int send_eip_request(cip_conn_p session, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     int32_t final_rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = 0;
@@ -3444,7 +3460,7 @@ int send_eip_request(ab_session_p session, int timeout) {
  * to fill in a packet.  If we already have a full packet,
  * punt.
  */
-int recv_eip_response(ab_session_p session, int timeout) {
+int recv_eip_response(cip_conn_p session, int timeout) {
     uint32_t data_needed = 0;
     int rc = PLCTAG_STATUS_OK;
     int32_t final_rc = PLCTAG_STATUS_OK;
@@ -3603,7 +3619,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
 }
 
 
-int perform_forward_close(ab_session_p session) {
+int perform_forward_close(cip_conn_p session) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
@@ -3628,7 +3644,7 @@ int perform_forward_close(ab_session_p session) {
 }
 
 
-int send_forward_open_request(ab_session_p session) {
+int send_forward_open_request(cip_conn_p session) {
     int rc = PLCTAG_STATUS_OK;
     uint16_t max_payload;
 
@@ -3679,7 +3695,7 @@ static uint16_t next_conn_serial_number(uint16_t current) {
 }
 
 
-int send_old_forward_open_request(ab_session_p session) {
+int send_old_forward_open_request(cip_conn_p session) {
     eip_forward_open_request_t *fo = NULL;
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
@@ -3772,7 +3788,7 @@ int send_old_forward_open_request(ab_session_p session) {
 
 
 /* new version of Forward Open */
-int send_extended_forward_open_request(ab_session_p session) {
+int send_extended_forward_open_request(cip_conn_p session) {
     eip_forward_open_request_ex_t *fo = NULL;
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
@@ -3847,7 +3863,7 @@ int send_extended_forward_open_request(ab_session_p session) {
 }
 
 
-int receive_forward_open_response(ab_session_p session) {
+int receive_forward_open_response(cip_conn_p session) {
     eip_forward_open_response_t *fo_resp;
     int rc = PLCTAG_STATUS_OK;
 
@@ -3956,7 +3972,7 @@ int receive_forward_open_response(ab_session_p session) {
 }
 
 
-int send_forward_close_req(ab_session_p session) {
+int send_forward_close_req(cip_conn_p session) {
     eip_forward_close_req_t *fc;
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
@@ -4021,7 +4037,7 @@ int send_forward_close_req(ab_session_p session) {
 }
 
 
-int recv_forward_close_resp(ab_session_p session) {
+int recv_forward_close_resp(cip_conn_p session) {
     eip_forward_close_resp_t *fo_resp;
     int rc = PLCTAG_STATUS_OK;
 
@@ -4078,7 +4094,7 @@ int recv_forward_close_resp(ab_session_p session) {
 }
 
 
-plc_type_t session_plc_type(ab_session_p session, int32_t *refused_rc) {
+plc_type_t session_plc_type(cip_conn_p session, int32_t *refused_rc) {
     plc_type_t plc_type = AB_PLC_NONE;
 
     critical_block(&session->session_mutex) {
@@ -4096,7 +4112,7 @@ plc_type_t session_plc_type(ab_session_p session, int32_t *refused_rc) {
  * returned to be retried like any connect failure.  An answer is final: a CIP error or a device
  * the classifier refuses is kept in refused_rc so the waiting tags fail with it.
  */
-int session_identify(ab_session_p session) {
+int session_identify(cip_conn_p session) {
     static uint8_t get_identity[] = {0x01, 0x02, 0x20, 0x01, 0x24, 0x01}; /* Get_Attributes_All, Identity, 1 */
     struct ab_request_t req;
     uint8_t *reply = NULL;
@@ -4106,7 +4122,7 @@ int session_identify(ab_session_p session) {
     char product_name[256];
     size_t name_len = 0;
     plc_type_t plc_type = AB_PLC_NONE;
-    const ab_plc_type_t *plc = NULL;
+    const cip_plc_type_t *plc = NULL;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
@@ -4189,11 +4205,7 @@ int session_identify(ab_session_p session) {
         if(!plc) {
             session->refused_rc = (rc != PLCTAG_STATUS_OK) ? rc : PLCTAG_ERR_BAD_DEVICE;
         } else {
-            session->plc_type = plc_type;
-            session->only_use_old_forward_open = plc->only_use_old_forward_open;
-            session->fo_conn_size = plc->fo_conn_size;
-            session->fo_ex_conn_size = plc->fo_ex_conn_size;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
+            session_apply_plc_type(session, plc);
             session->use_connected_msg = (plc->connected != 0);
 
             /* a connected PLC's path ends at its Message Router; it could not be known before. */
@@ -4216,7 +4228,7 @@ int session_identify(ab_session_p session) {
 }
 
 
-int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) {
+int session_create_request(cip_conn_p session, int tag_id, ab_request_p *req) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p res;
     size_t request_capacity = 0;

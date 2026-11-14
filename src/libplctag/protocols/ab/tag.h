@@ -77,7 +77,7 @@ struct ab_tag_t {
     attr deferred_attribs;
 
     /* pointers back to session */
-    ab_session_p session;
+    cip_conn_p session;
     int use_connected_msg;
 
     /* this contains the encoded name */
@@ -126,6 +126,9 @@ struct ab_tag_t {
      * whenever a response actually delivers data.
      */
     int fragment_retry_count;
+
+    /* the next read asks the PLC for the variable's size, so it can be read in segments. */
+    bool size_probe;
 
     /* requests */
     // int abort_requested;

@@ -32,6 +32,8 @@
  ***************************************************************************/
 
 #include <ctype.h>
+#include <inttypes.h>
+#include <stdbool.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab_common.h>
@@ -134,6 +136,12 @@ static int build_write_bit_request(ab_tag_p tag);
 static int check_read_status(ab_tag_p tag);
 static int check_write_status(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
+static bool uses_segments(ab_tag_p tag);
+static bool name_has_index(ab_tag_p tag);
+static int segment_read_budget(ab_tag_p tag);
+static bool reads_in_segments(ab_tag_p tag);
+static int encode_segment_path(ab_tag_p tag, uint8_t *dest, int byte_offset, int size);
+static int check_size_probe_status(ab_tag_p tag);
 
 static int tag_read_start(plc_tag_p tag_arg);
 static int tag_tickler(plc_tag_p tag_arg);
@@ -195,6 +203,30 @@ tag_byte_order_t omron_tag_byte_order = {.is_allocated = 0,
                                          .str_max_capacity = 0,
                                          .str_total_length = 0,
                                          .str_pad_bytes = 0};
+
+
+/*
+ * A PLC without the fragmented services (Omron NJ/NX) moves a variable too large for one packet
+ * in byte ranges instead: the plain Read and Write Tag services with a Simple Data Segment, 0x80,
+ * 3 words, a u32 byte offset and a u16 byte count, on the end of the path.
+ */
+#define CIP_DATA_SEGMENT ((uint8_t)0x80)
+#define CIP_DATA_SEGMENT_WORDS ((uint8_t)0x03)
+#define CIP_DATA_SEGMENT_SIZE (8)
+
+/* the widest type info a reply carries: an abbreviated struct, A0 02 and a CRC. */
+#define CIP_MAX_REPLY_TYPE_INFO_SIZE (4)
+
+/* the largest atomic type; a segment is cut on a multiple of it so no member is split. */
+#define CIP_MAX_ATOMIC_SIZE (8)
+
+/* an NJ/NX refuses a plain read too large for one reply with this, and does not say the size. */
+#define CIP_STATUS_REPLY_TOO_LARGE ((uint8_t)0x11)
+
+#define CIP_SYMBOLIC_SEGMENT ((uint8_t)0x91)
+#define CIP_CMD_GET_ATTRIBUTES_ALL ((uint8_t)0x01)
+#define CIP_DATA_TYPE_STRING ((uint8_t)0xD0)
+#define CIP_DATA_TYPE_SHORT_STRING ((uint8_t)0xDA)
 
 
 tag_byte_order_t logix_tag_listing_byte_order = {.is_allocated = 0,
@@ -404,21 +436,46 @@ int build_read_request(ab_tag_p tag, int byte_offset) {
     /* without the fragmented service the whole tag comes back in one reply or not at all. */
     read_cmd = ab_plc_type_get(tag->plc_type)->fragmented ? AB_EIP_CMD_CIP_READ_FRAG : AB_EIP_CMD_CIP_READ;
 
-    *data = read_cmd;
-    data++;
+    /* reply_size stays 0, unknown, unless this PLC needs it and it can be worked out. */
+    if(tag->size_probe) {
+        /* Get Attributes All on the variable gives its size; the reply size is not known. */
+        *data++ = CIP_CMD_GET_ATTRIBUTES_ALL;
+        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+        data += tag->encoded_name_size;
+    } else if(reads_in_segments(tag)) {
+        int chunk = segment_read_budget(tag);
 
-    /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
+        if(chunk > tag->size - byte_offset) { chunk = tag->size - byte_offset; }
 
-    /* add the count of elements to read. */
-    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
-    data += sizeof(uint16_le);
+        /* the plain Read Tag service, the byte range in the path, and one element. */
+        *data++ = AB_EIP_CMD_CIP_READ;
+        data += encode_segment_path(tag, data, byte_offset, chunk);
+        *((uint16_le *)data) = h2le16((uint16_t)1);
+        data += sizeof(uint16_le);
 
-    if(read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
-        /* add the byte offset for this request */
-        *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
-        data += sizeof(uint32_le);
+        req->reply_size = (int)sizeof(cip_header) + CIP_MAX_REPLY_TYPE_INFO_SIZE + chunk;
+
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Reading a segment of %d bytes at %d.", chunk, byte_offset);
+    } else {
+        *data = read_cmd;
+        data++;
+
+        /* copy the tag name into the request */
+        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+        data += tag->encoded_name_size;
+
+        /* add the count of elements to read. */
+        *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
+        data += sizeof(uint16_le);
+
+        if(read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
+            /* add the byte offset for this request */
+            *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
+            data += sizeof(uint32_le);
+        } else if(tag->size > 0) {
+            /* the size the last read found.  A create read does not know it, so it goes alone. */
+            req->reply_size = (int)sizeof(cip_header) + CIP_MAX_REPLY_TYPE_INFO_SIZE + tag->size;
+        }
     }
 
 
@@ -578,6 +635,9 @@ int build_write_bit_request(ab_tag_p tag) {
     /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
 
+    /* a bit write reply is only its header. */
+    if(!ab_plc_type_get(tag->plc_type)->fragmented) { req->reply_size = (int)sizeof(cip_header); }
+
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
 
@@ -605,6 +665,7 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
     int multiple_requests = 0;
     int write_size = 0;
     int str_pad_to_multiple_bytes = 1;
+    bool segmented = false;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
@@ -626,11 +687,16 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
 
     if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
 
-    if(multiple_requests && !ab_plc_type_get(tag->plc_type)->fragmented) {
+    segmented = multiple_requests && uses_segments(tag);
+
+    if(multiple_requests && !segmented && !ab_plc_type_get(tag->plc_type)->fragmented) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Tag too large for one write and this PLC has no fragmented write!");
-        ab_tag_abort_request(tag);
+        rc_dec(req);
         return PLCTAG_ERR_TOO_LARGE;
     }
+
+    /* a write reply is only its header. */
+    if(!ab_plc_type_get(tag->plc_type)->fragmented) { req->reply_size = (int)sizeof(cip_header); }
 
 
     /* the session writes the EIP and CPF framing; this is only the CIP request. */
@@ -654,12 +720,21 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
      * This handles a bug where attempting fragmented requests
      * does not appear to work with a single boolean.
      */
-    *data = (multiple_requests) ? AB_EIP_CMD_CIP_WRITE_FRAG : AB_EIP_CMD_CIP_WRITE;
+    *data = (multiple_requests && !segmented) ? AB_EIP_CMD_CIP_WRITE_FRAG : AB_EIP_CMD_CIP_WRITE;
     data++;
 
-    /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
+    /* how much data to write? */
+    write_size = tag->size - tag->offset;
+
+    if(write_size > tag->write_data_per_packet) { write_size = tag->write_data_per_packet; }
+
+    /* copy the tag name into the request, with the byte range on the end for a segment. */
+    if(segmented) {
+        data += encode_segment_path(tag, data, byte_offset, write_size);
+    } else {
+        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+        data += tag->encoded_name_size;
+    }
 
     /* copy encoded type info */
     if(tag->encoded_type_info_size) {
@@ -670,20 +745,15 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
-    /* copy the item count, little endian */
-    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
+    /* copy the item count, little endian.  A segment is one element of its byte range. */
+    *((uint16_le *)data) = h2le16((uint16_t)(segmented ? 1 : tag->elem_count));
     data += sizeof(uint16_le);
 
-    if(multiple_requests) {
+    if(multiple_requests && !segmented) {
         /* put in the byte offset */
         *((uint32_le *)data) = h2le32((uint32_t)(byte_offset));
         data += sizeof(uint32_le);
     }
-
-    /* how much data to write? */
-    write_size = tag->size - tag->offset;
-
-    if(write_size > tag->write_data_per_packet) { write_size = tag->write_data_per_packet; }
 
     /* now copy the data to write */
     mem_copy(data, tag->data + tag->offset, write_size);
@@ -695,7 +765,7 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
         the length of the string and the count integer, therefor this padding can be disabled using the str_pad_16_bits attribute
      */
     str_pad_to_multiple_bytes = (int)tag->byte_order->str_pad_to_multiple_bytes;
-    if((str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0) {
+    if(!segmented && (str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0) {
         if(write_size % str_pad_to_multiple_bytes != 0) {
             int pad_size = str_pad_to_multiple_bytes - (write_size % str_pad_to_multiple_bytes);
             for(int i = 0; i < pad_size; i++) {
@@ -748,8 +818,11 @@ static int check_read_status(ab_tag_p tag) {
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
+    bool segmented = reads_in_segments(tag);
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Starting.");
+
+    if(tag->size_probe) { return check_size_probe_status(tag); }
 
     /* The request is valid. */
 
@@ -785,6 +858,13 @@ static int check_read_status(ab_tag_p tag) {
                    decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
 
             rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
+
+            /* too large for one reply: find the size, then read it in segments. */
+            if(cip_resp->status == CIP_STATUS_REPLY_TOO_LARGE && !segmented && uses_segments(tag)) {
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Too large for one reply, asking for its size.");
+                tag->size_probe = true;
+                rc = PLCTAG_STATUS_PENDING;
+            }
 
             break;
         }
@@ -894,11 +974,16 @@ static int check_read_status(ab_tag_p tag) {
 
             /* bump the byte offset */
             tag->offset += (int)(payload_size);
+
+            /* a segmented transfer is partial until every byte has come back. */
+            if(segmented && tag->offset < tag->size) { partial_data = 1; }
         } else {
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
 
             /* no payload means no forward progress on a fragmented transfer. */
             tag->fragment_retry_count++;
+
+            if(segmented) { partial_data = 1; }
         }
 
         /* set the return code */
@@ -907,6 +992,9 @@ static int check_read_status(ab_tag_p tag) {
 
     /* clean up the request */
     ab_tag_abort_request_only(tag);
+
+    /* the size probe goes next. */
+    if(rc == PLCTAG_STATUS_PENDING) { rc = tag_read_start((plc_tag_p)tag); }
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -1055,6 +1143,9 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
                    + 8;                          /* MAGIC fudge factor */
     }
 
+    /* a data segment in the path takes eight bytes where the offset field took four. */
+    if(!ab_plc_type_get(tag->plc_type)->fragmented) { overhead += CIP_DATA_SEGMENT_SIZE - 4; }
+
     /* make sure that overhead is an even number of bytes */
     if(overhead & 1) { overhead++; }
 
@@ -1115,4 +1206,164 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Done.");
 
     return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * Segments are for a PLC without the fragmented services, a whole variable rather than an
+ * indexed element, and elements on a fixed stride.  A string array has no stride: each
+ * element is a count and that many characters, so a byte range does not name elements.
+ */
+static bool uses_segments(ab_tag_p tag) {
+    if(ab_plc_type_get(tag->plc_type)->fragmented || tag->is_bit || name_has_index(tag)) { return false; }
+
+    if(tag->elem_type == AB_TYPE_STRING || tag->elem_type == AB_TYPE_SHORT_STRING) { return false; }
+
+    if(tag->encoded_type_info_size > 0
+       && (tag->encoded_type_info[0] == CIP_DATA_TYPE_STRING || tag->encoded_type_info[0] == CIP_DATA_TYPE_SHORT_STRING)) {
+        return false;
+    }
+
+    return true;
+}
+
+
+/* true when the encoded name addresses an array element rather than a whole variable. */
+static bool name_has_index(ab_tag_p tag) {
+    int i = 1; /* past the word count */
+
+    while(i < tag->encoded_name_size) {
+        int name_len = 0;
+
+        /* anything but a symbolic segment is an element (or other) segment. */
+        if(tag->encoded_name[i] != CIP_SYMBOLIC_SEGMENT || i + 1 >= tag->encoded_name_size) { return true; }
+
+        name_len = tag->encoded_name[i + 1];
+        i += 2 + name_len + (name_len & 1);
+    }
+
+    return false;
+}
+
+
+/*
+ * The most data one segment can ask for: the reply has to hold it with its CIP header and type
+ * info.  It is cut on the boundaries a split write uses, so no atomic member is split.
+ */
+static int segment_read_budget(ab_tag_p tag) {
+    int split = (tag->elem_size > 0 && tag->elem_size < CIP_MAX_ATOMIC_SIZE) ? tag->elem_size : CIP_MAX_ATOMIC_SIZE;
+    int budget = session_get_available_cip_payload_space(tag->session) - (int)sizeof(cip_header) - CIP_MAX_REPLY_TYPE_INFO_SIZE
+                 - 8; /* MAGIC fudge factor, as for writes */
+
+    return (budget / split) * split;
+}
+
+
+static bool reads_in_segments(ab_tag_p tag) { return tag->size > segment_read_budget(tag) && uses_segments(tag); }
+
+
+/* the tag's encoded name with a Simple Data Segment for size bytes at byte_offset appended. */
+static int encode_segment_path(ab_tag_p tag, uint8_t *dest, int byte_offset, int size) {
+    uint8_t *data = dest;
+
+    *data++ = (uint8_t)(tag->encoded_name[0] + CIP_DATA_SEGMENT_SIZE / 2);
+    mem_copy(data, tag->encoded_name + 1, tag->encoded_name_size - 1);
+    data += tag->encoded_name_size - 1;
+
+    *data++ = CIP_DATA_SEGMENT;
+    *data++ = CIP_DATA_SEGMENT_WORDS;
+    *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
+    data += sizeof(uint32_le);
+    *((uint16_le *)data) = h2le16((uint16_t)size);
+    data += sizeof(uint16_le);
+
+    return (int)(data - dest);
+}
+
+
+/*
+ * The reply to Get Attributes All on the variable: its size (4), type (1) and array element
+ * type (1).  The size is one element's, so the tag's elem_count elements from the start are
+ * then read in segments.
+ *
+ * ponytail: that an NJ/NX refuses an oversized read with 0x11, rather than another error, is
+ * not confirmed on hardware; the simulator does.
+ */
+static int check_size_probe_status(ab_tag_p tag) {
+    cip_header *cip_resp = (cip_header *)(tag->req->data);
+    uint8_t *data = tag->req->data + sizeof(cip_header);
+    uint8_t *data_end = tag->req->data + tag->req->request_size;
+    int64_t total = 0;
+    int rc = PLCTAG_STATUS_OK;
+
+    tag->size_probe = false;
+
+    do {
+        if(cip_resp->reply_service != (CIP_CMD_GET_ATTRIBUTES_ALL | AB_EIP_CMD_CIP_OK)) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
+                   cip_resp->reply_service);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
+        if(cip_resp->status != AB_CIP_STATUS_OK) {
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
+
+            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Variable size request failed with status: 0x%x %s",
+                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
+            break;
+        }
+
+        if(data_end - data < 6) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Variable attributes reply is too short!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        total = (int64_t)((uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24))
+                * tag->elem_count;
+
+        if(data[4] == CIP_DATA_TYPE_STRING || data[5] == CIP_DATA_TYPE_STRING || total <= 0 || total > AB_MAX_TAG_DATA_SIZE) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                   "Variable of %" PRId64 " bytes, type 0x%02x, cannot be read in segments!", total, (unsigned int)data[4]);
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
+
+        if(total != tag->size) {
+            uint8_t *new_data = (uint8_t *)mem_realloc(tag->data, (int)total);
+
+            if(!new_data) {
+                rc = PLCTAG_ERR_NO_MEM;
+                break;
+            }
+
+            tag->data = new_data;
+            tag->size = (int)total;
+        }
+
+        tag->elem_size = tag->size / tag->elem_count;
+        tag->offset = 0;
+
+        /* small enough for one read means the refusal was not about size; asking again would loop. */
+        if(!reads_in_segments(tag)) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Read of %d bytes was refused as too large!", tag->size);
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
+
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Variable is %d bytes, reading it in segments.", tag->size);
+    } while(0);
+
+    ab_tag_abort_request_only(tag);
+
+    if(rc == PLCTAG_STATUS_OK) { rc = tag_read_start((plc_tag_p)tag); }
+
+    if(rc != PLCTAG_STATUS_PENDING) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Error reading tag data! rc=%d %s", rc, plc_tag_decode_error(rc));
+        ab_tag_abort_request(tag);
+    }
+
+    return rc;
 }
