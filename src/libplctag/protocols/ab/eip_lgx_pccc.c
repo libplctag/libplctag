@@ -277,7 +277,7 @@ static int check_read_status(ab_tag_p tag) {
         int pccc_res_type;
         int pccc_res_length;
 
-        rc = pccc_check_response_header(tag, false);
+        rc = pccc_check_response_header(tag, NULL);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         pccc = (pccc_resp *)(tag->req->data);
@@ -498,7 +498,7 @@ static int check_write_status(ab_tag_p tag) {
     do {
         pccc_resp *pccc = NULL;
 
-        rc = pccc_check_response_header(tag, false);
+        rc = pccc_check_response_header(tag, NULL);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         pccc = (pccc_resp *)(tag->req->data);

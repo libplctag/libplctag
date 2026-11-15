@@ -133,7 +133,7 @@ static int process_requests(cip_conn_p session);
 // static int check_packing(cip_conn_p session, ab_request_p request);
 static int get_payload_size(cip_conn_p session, ab_request_p request);
 static int frame_cip_request(cip_conn_p session, ab_request_p request);
-static int check_response_framing(cip_conn_p session);
+static int check_response_framing(cip_conn_p session, size_t *reply_offset);
 static int pack_requests(cip_conn_p session, ab_request_p *requests, int num_requests);
 static int prepare_request(cip_conn_p session);
 static int send_eip_request(cip_conn_p session, int timeout);
@@ -2598,106 +2598,20 @@ int process_requests(cip_conn_p session) {
              */
             if(num_bundled_requests > 1) {
                 cip_multi_resp_header *multi_resp = NULL;
+                size_t reply_offset = 0;
 
-                if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_UNCONNECTED_SEND) {
-                    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(session->data);
-                    uint16_t udi_item_length = 0;
-                    size_t response_overhead = 0;
-                    size_t response_size = 0;
+                if((rc = check_response_framing(session, &reply_offset)) != PLCTAG_STATUS_OK) { break; }
 
-                    /* we only know we got an EIP header, so check before reading CPF/CIP fields. */
-                    if((size_t)session->data_size < sizeof(*resp)) {
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                               "Unconnected response of %u bytes is too short to hold a CIP response of %d bytes!",
-                               session->data_size, (int)sizeof(*resp));
-                        rc = PLCTAG_ERR_TOO_SMALL;
-                        break;
-                    }
+                multi_resp = (cip_multi_resp_header *)(session->data + reply_offset);
 
-                    udi_item_length = le2h16(resp->cpf_udi_item_length);
+                /* punt if we got an overall error or it is not a partial/bundled error. */
+                if(multi_resp->status != AB_EIP_OK && multi_resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
+                    size_t status_size = cip_error_data_size(&multi_resp->status, session->data + session->data_size);
 
-                    multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
-
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Received unconnected packet with session sequence ID %llx",
-                           resp->encap_sender_context);
-
-                    /* punt if we got an overall error or it is not a partial/bundled error. */
-                    if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
-                        rc = decode_cip_error_code(&(resp->status),
-                                                   cip_error_data_size(&resp->status, session->data + session->data_size));
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
-                               plc_tag_decode_error(rc));
-                        break;
-                    }
-
-                    response_overhead = (size_t)((uint8_t *)multi_resp - session->data);
-                    response_size = (size_t)session->data_size - response_overhead;
-
-                    /* check the passed UDI data item size against what we really got. */
-                    if((size_t)udi_item_length != response_size) {
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                               "Incorrectly constructed response! UDI data length field is %zu but actual size is %zu!",
-                               (size_t)udi_item_length, response_size);
-
-                        rc = PLCTAG_ERR_BAD_DATA;
-                        break;
-                    }
-                } else if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
-                    eip_cip_co_resp *resp = (eip_cip_co_resp *)(session->data);
-                    uint16_t cdi_item_length = 0;
-                    size_t response_overhead = 0;
-                    size_t response_size = 0;
-
-                    /* we only know we got an EIP header, so check before reading CPF/CIP fields. */
-                    if((size_t)session->data_size < sizeof(*resp)) {
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                               "Connected response of %u bytes is too short to hold a CIP response of %d bytes!",
-                               session->data_size, (int)sizeof(*resp));
-                        rc = PLCTAG_ERR_TOO_SMALL;
-                        break;
-                    }
-
-                    cdi_item_length = le2h16(resp->cpf_cdi_item_length);
-
-                    multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
-
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0,
-                           "Received connected packet with connection ID %x and sequence ID %u(%x)",
-                           le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
-
-                    /* punt if we got an overall error or it is not a partial/bundled error. */
-                    if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
-                        size_t status_size = cip_error_data_size(&resp->status, session->data + session->data_size);
-
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Response status=%u", resp->status);
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received CIP error %s (%s).",
-                               decode_cip_error_long(&resp->status, status_size),
-                               decode_cip_error_short(&resp->status, status_size));
-                        rc = decode_cip_error_code(&(resp->status), status_size);
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
-                               plc_tag_decode_error(rc));
-                        break;
-                    }
-
-                    response_overhead = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - session->data);
-                    response_size = (size_t)session->data_size - response_overhead;
-
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "response_overhead=%zu", response_overhead);
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "response_size=%zu", response_size);
-
-                    /* check the passed CDI data item size against what we really got. */
-                    if((size_t)cdi_item_length != response_size) {
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                               "Incorrectly constructed response! CDI data length field is %zu but actual size is %zu!",
-                               (size_t)cdi_item_length, response_size);
-
-                        rc = PLCTAG_ERR_BAD_DATA;
-                        break;
-                    }
-                } else {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unexpected EIP packet type, %04x!",
-                           le2h16(((eip_encap *)(session->data))->encap_command));
-                    rc = PLCTAG_ERR_BAD_DATA;
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received CIP error %s (%s).",
+                           decode_cip_error_long(&multi_resp->status, status_size),
+                           decode_cip_error_short(&multi_resp->status, status_size));
+                    rc = decode_cip_error_code(&multi_resp->status, status_size);
                     break;
                 }
 
@@ -2812,7 +2726,7 @@ int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, in
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, request->tag_id, "Starting.");
 
     /* a bad frame fails this request, not the session: the tag gets the error. */
-    rc = check_response_framing(session);
+    rc = check_response_framing(session, &reply_offset);
     if(rc != PLCTAG_STATUS_OK) {
         spin_block(&request->lock) {
             request->status = rc;
@@ -2821,13 +2735,6 @@ int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, in
         }
 
         return PLCTAG_STATUS_OK;
-    }
-
-    /* where the CIP reply starts depends on the framing. */
-    if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
-        reply_offset = offsetof(eip_cip_co_resp, reply_service);
-    } else {
-        reply_offset = offsetof(eip_cip_uc_resp, reply_service);
     }
 
     if(reply_offset + sizeof(cip_header) > (size_t)session->data_size) {
@@ -2930,9 +2837,10 @@ int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, in
 
 /*
  * Check the EIP and CPF framing of the response in the session buffer: EIP status, CPF items,
- * our connection ID, and a data item length that matches what arrived.
+ * our connection ID, and a data item length that matches what arrived.  *reply_offset is where
+ * the CIP reply starts.
  */
-int check_response_framing(cip_conn_p session) {
+int check_response_framing(cip_conn_p session, size_t *reply_offset) {
     eip_encap *encap = (eip_encap *)(session->data);
     const char *kind = NULL;
     size_t data_item_start = 0;
@@ -2983,6 +2891,7 @@ int check_response_framing(cip_conn_p session) {
 
         data_item_start = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - session->data);
         data_item_length = (size_t)le2h16(resp->cpf_cdi_item_length);
+        *reply_offset = offsetof(eip_cip_co_resp, reply_service);
     } else if(le2h16(encap->encap_command) == AB_EIP_UNCONNECTED_SEND) {
         eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(session->data);
 
@@ -3009,6 +2918,7 @@ int check_response_framing(cip_conn_p session) {
 
         data_item_start = (size_t)((uint8_t *)(&resp->reply_service) - session->data);
         data_item_length = (size_t)le2h16(resp->cpf_udi_item_length);
+        *reply_offset = offsetof(eip_cip_uc_resp, reply_service);
     } else {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unexpected EIP packet type %04x!", le2h16(encap->encap_command));
         return PLCTAG_ERR_BAD_DATA;
@@ -4116,6 +4026,7 @@ int session_identify(cip_conn_p session) {
     static uint8_t get_identity[] = {0x01, 0x02, 0x20, 0x01, 0x24, 0x01}; /* Get_Attributes_All, Identity, 1 */
     struct ab_request_t req;
     uint8_t *reply = NULL;
+    size_t reply_offset = 0;
     uint8_t *data_end = NULL;
     uint8_t *data = NULL;
     uint16_t vendor_id = 0;
@@ -4146,9 +4057,9 @@ int session_identify(cip_conn_p session) {
     }
 
     do {
-        if((rc = check_response_framing(session)) != PLCTAG_STATUS_OK) { break; }
+        if((rc = check_response_framing(session, &reply_offset)) != PLCTAG_STATUS_OK) { break; }
 
-        reply = session->data + offsetof(eip_cip_uc_resp, reply_service);
+        reply = session->data + reply_offset;
         data_end = session->data + session->data_size;
 
         /* a routed request may come back inside a successful Unconnected Send reply. */

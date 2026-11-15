@@ -84,17 +84,12 @@ extern int pccc_status_to_rc(uint8_t *error_ptr, size_t error_size);
 extern uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, int *pccc_res_length);
 extern int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size);
 
-/* generic direct ethernet tag functions */
-extern int pccc_check_response_header(ab_tag_p tag, bool is_dhp);
+/* PLC/5, SLC and MicroLogix, through CIP or a DH+ bridge */
+/* checks the reply is ours; *pccc_reply, when asked for, is where the PCCC command reply starts. */
+extern int pccc_check_response_header(ab_tag_p tag, uint8_t **pccc_reply);
 extern int pccc_tag_status(ab_tag_p tag);
 extern int pccc_tag_tickler(ab_tag_p tag);
 extern int pccc_tag_read_start(ab_tag_p tag);
 extern int pccc_tag_write_start(ab_tag_p tag);
-
-/* PCCC over DH+ */
-extern int pccc_dhp_tag_status(ab_tag_p tag);
-extern int pccc_dhp_tag_tickler(ab_tag_p tag);
-extern int pccc_dhp_tag_read_start(ab_tag_p tag);
-extern int pccc_dhp_tag_write_start(ab_tag_p tag);
 
 #endif

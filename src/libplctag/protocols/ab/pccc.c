@@ -153,37 +153,6 @@ START_PACK typedef struct {
     uint8_t pccc_command;   /* CMD read, write etc. */
     uint8_t pccc_status;    /* STS 0x00 in request */
     uint16_le pccc_seq_num; /* TNS transaction/sequence id */
-    uint8_t pccc_function;  /* FNC sub-function of command */
-} END_PACK pccc_dhp_rmw_cmd_req;
-
-START_PACK typedef struct {
-    /* DH+ Routing */
-    uint16_le dest_link;
-    uint16_le dest_node;
-    uint16_le src_link;
-    uint16_le src_node;
-
-    /* PCCC Command */
-    uint8_t pccc_command;         /* CMD read, write etc. */
-    uint8_t pccc_status;          /* STS 0x00 in request */
-    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
-    uint8_t pccc_function;        /* FNC sub-function of command */
-    uint16_le pccc_offset;        /* offset of requested in total request */
-    uint16_le pccc_transfer_size; /* total number of words requested */
-} END_PACK pccc_dhp_write_cmd_req;
-
-
-START_PACK typedef struct {
-    /* DH+ Routing */
-    uint16_le dest_link;
-    uint16_le dest_node;
-    uint16_le src_link;
-    uint16_le src_node;
-
-    /* PCCC Command */
-    uint8_t pccc_command;   /* CMD read, write etc. */
-    uint8_t pccc_status;    /* STS 0x00 in request */
-    uint16_le pccc_seq_num; /* TNS transaction/sequence id */
 } END_PACK pccc_dhp_cmd_resp;
 
 
@@ -205,11 +174,9 @@ static int pccc_check_write_status(ab_tag_p tag);
 static int plc5_tag_write_bit_start(ab_tag_p tag);
 static int slc_tag_write_bit_start(ab_tag_p tag);
 
-static int pccc_dhp_check_read_status(ab_tag_p tag);
-static int pccc_dhp_check_write_status(ab_tag_p tag);
-static int plc5_dhp_tag_write_bit_start(ab_tag_p tag);
-
-static int slc_dhp_tag_write_bit_start(ab_tag_p tag);
+static uint8_t *pccc_write_prefix(ab_tag_p tag, uint8_t *buf);
+static size_t pccc_prefix_size(ab_tag_p tag);
+static size_t pccc_reply_prefix_size(ab_tag_p tag);
 
 /*
  * Public functions
@@ -1427,19 +1394,22 @@ void encode_data(uint8_t *data, int *index, int val) {
  * DH+ responses arrive behind a connected CPF header, everything else behind an
  * unconnected one.
  */
-int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
+int pccc_check_response_header(ab_tag_p tag, uint8_t **pccc_reply) {
     int min_size = 0;
     pccc_cmd_resp *pccc_cmd = NULL;
+    bool is_dhp = false;
 
     if(!tag || !tag->req) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, (tag ? tag->tag_id : 0), "Called without a request in flight!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    is_dhp = (tag->session->is_dhp != 0);
+
     if(is_dhp) {
         min_size = (int)sizeof(pccc_dhp_cmd_resp);
     } else {
-        min_size = (int)(sizeof(cip_pccc_resp) + sizeof(pccc_cmd_resp));
+        min_size = (int)((int)(pccc_reply_prefix_size(tag) + sizeof(pccc_cmd_resp)));
     }
 
     if(tag->req->request_size < min_size) {
@@ -1494,6 +1464,14 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
             return PLCTAG_ERR_BAD_DATA;
         }
 
+        if(cip_pccc->general_status != AB_EIP_OK) {
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
+                   cip_pccc->general_status,
+                   decode_cip_error_long(&cip_pccc->general_status,
+                                         cip_error_data_size(&cip_pccc->general_status, tag->req->data + tag->req->request_size)));
+            return PLCTAG_ERR_REMOTE_ERR;
+        }
+
         pccc_cmd = (pccc_cmd_resp *)(cip_pccc + 1);
     }
 
@@ -1503,7 +1481,51 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
         return PLCTAG_ERR_BAD_DATA;
     }
 
+    if(pccc_reply) { *pccc_reply = (uint8_t *)pccc_cmd; }
+
     return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * Write what goes in front of the PCCC command: Execute PCCC (0x4B) with our requester ID
+ * through CIP, or the DH+ routing words through a DH+ bridge.  Returns where the command starts.
+ */
+uint8_t *pccc_write_prefix(ab_tag_p tag, uint8_t *buf) {
+    if(tag->session->is_dhp) {
+        pccc_dhp_routing_header *dhp = (pccc_dhp_routing_header *)buf;
+
+        dhp->dest_link = h2le16(0);
+        dhp->dest_node = h2le16(tag->session->dhp_dest);
+        dhp->src_link = h2le16(0);
+        dhp->src_node = h2le16(0);
+
+        return (uint8_t *)(dhp + 1);
+    } else {
+        cip_pccc_req *cip_pccc = (cip_pccc_req *)buf;
+
+        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
+        cip_pccc->req_path_size = 2;
+        cip_pccc->req_path[0] = 0x20;
+        cip_pccc->req_path[1] = 0x67;
+        cip_pccc->req_path[2] = 0x24;
+        cip_pccc->req_path[3] = 0x01;
+        cip_pccc->request_id_size = 7;
+        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
+        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+
+        return (uint8_t *)(cip_pccc + 1);
+    }
+}
+
+
+size_t pccc_prefix_size(ab_tag_p tag) {
+    return tag->session->is_dhp ? sizeof(pccc_dhp_routing_header) : sizeof(cip_pccc_req);
+}
+
+
+size_t pccc_reply_prefix_size(ab_tag_p tag) {
+    return tag->session->is_dhp ? sizeof(pccc_dhp_routing_header) : sizeof(cip_pccc_resp);
 }
 
 
@@ -1620,7 +1642,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
         tag->read_in_progress = 1;
 
         /* calculate response overhead and available payload space */
-        int response_overhead = sizeof(cip_pccc_resp) + sizeof(pccc_cmd_resp);
+        int response_overhead = (int)(pccc_reply_prefix_size(tag) + sizeof(pccc_cmd_resp));
         int response_payload_space = cip_payload_space - response_overhead;
 
         if(response_payload_space < 0) {
@@ -1643,14 +1665,14 @@ int pccc_tag_read_start(ab_tag_p tag) {
 
         /* calculate request overhead */
         int request_overhead =
-            (int)sizeof(cip_pccc_req)
+            (int)pccc_prefix_size(tag)
             + (tag->plc_type == AB_PLC_PLC5 ? (int)sizeof(plc5_pccc_read_cmd_req) : (int)sizeof(slc_pccc_read_cmd_req))
             + tag->encoded_name_size + 1;
 
         pdebug(
             DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id,
             "PLC5 request overhead: CIP/PCCC header size %zu, PCCC read command header size %zu, encoded_name=%d, data_size=1, total=%d bytes",
-            sizeof(cip_pccc_req), sizeof(plc5_pccc_read_cmd_req), tag->encoded_name_size, request_overhead);
+            pccc_prefix_size(tag), sizeof(plc5_pccc_read_cmd_req), tag->encoded_name_size, request_overhead);
 
         int request_payload_space = cip_payload_space - request_overhead;
 
@@ -1683,23 +1705,11 @@ int pccc_tag_read_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        cip_pccc_req *cip_pccc = (cip_pccc_req *)(req->data);
-        embed_start = (uint8_t *)(&cip_pccc->service_code);
-
-        /* fill in CIP/PCCC header fields */
-        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
-        cip_pccc->req_path_size = 2;
-        cip_pccc->req_path[0] = 0x20;
-        cip_pccc->req_path[1] = 0x67;
-        cip_pccc->req_path[2] = 0x24;
-        cip_pccc->req_path[3] = 0x01;
-
-        cip_pccc->request_id_size = 7;
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        uint8_t *cmd_start = pccc_write_prefix(tag, req->data);
+        embed_start = req->data;
 
         if(tag->plc_type == AB_PLC_PLC5) {
-            plc5_pccc_read_cmd_req *pccc_cmd = (plc5_pccc_read_cmd_req *)(cip_pccc + 1);
+            plc5_pccc_read_cmd_req *pccc_cmd = (plc5_pccc_read_cmd_req *)cmd_start;
 
             /* fill in PCCC command fields */
             pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -1712,7 +1722,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
             /* point data pointer just past the fixed data fields */
             data = (uint8_t *)(pccc_cmd + 1);
         } else {
-            slc_pccc_read_cmd_req *pccc_cmd = (slc_pccc_read_cmd_req *)(cip_pccc + 1);
+            slc_pccc_read_cmd_req *pccc_cmd = (slc_pccc_read_cmd_req *)cmd_start;
 
             /* fill in PCCC command fields */
             pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -1749,7 +1759,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
 
         /* set request size */
         req->request_size = (int)cip_request_size;
-        req->connected = false;
+        req->connected = (tag->session->is_dhp != 0); /* DH+ goes over the bridge's connection. */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request size set to %d bytes.", req->request_size);
 
         /* debug: dump request data */
@@ -1800,10 +1810,11 @@ int pccc_tag_read_start(ab_tag_p tag) {
  */
 int pccc_check_read_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    pccc_cmd_resp *pccc_cmd = NULL;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
 
-    rc = pccc_check_response_header(tag, false);
+    rc = pccc_check_response_header(tag, (uint8_t **)&pccc_cmd);
     if(rc != PLCTAG_STATUS_OK) {
         ab_tag_abort_request(tag);
         tag->read_in_progress = 0;
@@ -1811,24 +1822,11 @@ int pccc_check_read_status(ab_tag_p tag) {
         return rc;
     }
 
-    /* get the header pointers */
-    cip_pccc_resp *cip_pccc = (cip_pccc_resp *)(tag->req->data);
-    pccc_cmd_resp *pccc_cmd = (pccc_cmd_resp *)(cip_pccc + 1);
-
     uint8_t *data = (uint8_t *)(pccc_cmd + 1);
     uint8_t *data_end = tag->req->data + tag->req->request_size;
 
     /* fake exceptions */
     do {
-        if(cip_pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
-                   cip_pccc->general_status,
-                   decode_cip_error_long((uint8_t *)&(cip_pccc->general_status),
-                                         cip_error_data_size((uint8_t *)&(cip_pccc->general_status), data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(pccc_cmd->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
@@ -1902,7 +1900,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
         tag->write_in_progress = 1;
 
         /* How much overhead? */
-        overhead = sizeof(cip_pccc_req)
+        overhead = pccc_prefix_size(tag)
                    + (tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_write_cmd_req) : sizeof(slc_pccc_write_cmd_req))
                    + (size_t)(unsigned int)tag->encoded_name_size + 1;
 
@@ -1951,25 +1949,12 @@ int pccc_tag_write_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        cip_pccc_req *cip_pccc = (cip_pccc_req *)(req->data);
-        embed_start = (uint8_t *)(&cip_pccc->service_code);
-
-        /* fill in CIP/PCCC header fields */
-        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
-        cip_pccc->req_path_size = 2;
-        cip_pccc->req_path[0] = 0x20;
-        cip_pccc->req_path[1] = 0x67;
-        cip_pccc->req_path[2] = 0x24;
-        cip_pccc->req_path[3] = 0x01;
-
-        cip_pccc->request_id_size =
-            (uint8_t)(sizeof(cip_pccc->request_id_size) + sizeof(cip_pccc->vendor_id) + sizeof(cip_pccc->vendor_serial_number));
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        uint8_t *cmd_start = pccc_write_prefix(tag, req->data);
+        embed_start = req->data;
 
         /* fill in PCCC command fields */
         if(tag->plc_type == AB_PLC_PLC5) {
-            plc5_pccc_write_cmd_req *pccc_cmd = (plc5_pccc_write_cmd_req *)(cip_pccc + 1);
+            plc5_pccc_write_cmd_req *pccc_cmd = (plc5_pccc_write_cmd_req *)cmd_start;
 
             pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
             pccc_cmd->pccc_status = 0;
@@ -1981,7 +1966,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
             /* point data pointer just past the fixed data fields */
             data = (uint8_t *)(pccc_cmd + 1);
         } else {
-            slc_pccc_write_cmd_req *pccc_cmd = (slc_pccc_write_cmd_req *)(cip_pccc + 1);
+            slc_pccc_write_cmd_req *pccc_cmd = (slc_pccc_write_cmd_req *)cmd_start;
 
             pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
             pccc_cmd->pccc_status = 0;
@@ -2020,7 +2005,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
 
         /* set request size */
         req->request_size = (int)cip_request_size;
-        req->connected = false;
+        req->connected = (tag->session->is_dhp != 0); /* DH+ goes over the bridge's connection. */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
@@ -2084,7 +2069,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         tag->write_in_progress = 1;
 
         /* How much overhead? */
-        overhead = sizeof(cip_pccc_req) + sizeof(plc5_pccc_write_cmd_req) + (size_t)(unsigned int)tag->encoded_name_size + 1;
+        overhead = pccc_prefix_size(tag) + sizeof(plc5_pccc_write_cmd_req) + (size_t)(unsigned int)tag->encoded_name_size + 1;
 
         int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
@@ -2131,22 +2116,9 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        cip_pccc_req *cip_pccc = (cip_pccc_req *)(req->data);
-        pccc_rmw_cmd_req *pccc_cmd = (pccc_rmw_cmd_req *)(cip_pccc + 1);
-        embed_start = (uint8_t *)(&cip_pccc->service_code);
-
-        /* fill in CIP/PCCC header fields */
-        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
-        cip_pccc->req_path_size = 2;
-        cip_pccc->req_path[0] = 0x20;
-        cip_pccc->req_path[1] = 0x67;
-        cip_pccc->req_path[2] = 0x24;
-        cip_pccc->req_path[3] = 0x01;
-
-        cip_pccc->request_id_size =
-            (uint8_t)(sizeof(cip_pccc->request_id_size) + sizeof(cip_pccc->vendor_id) + sizeof(cip_pccc->vendor_serial_number));
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        uint8_t *cmd_start = pccc_write_prefix(tag, req->data);
+        embed_start = req->data;
+        pccc_rmw_cmd_req *pccc_cmd = (pccc_rmw_cmd_req *)cmd_start;
 
         /* fill in PCCC command fields */
         pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -2211,7 +2183,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
 
         /* set request size */
         req->request_size = (int)cip_request_size;
-        req->connected = false;
+        req->connected = (tag->session->is_dhp != 0); /* DH+ goes over the bridge's connection. */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
@@ -2284,7 +2256,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         tag->write_in_progress = 1;
 
         /* How much overhead? */
-        overhead = sizeof(cip_pccc_req) + sizeof(slc_pccc_write_cmd_req) + (size_t)(unsigned int)tag->encoded_name_size + 1;
+        overhead = pccc_prefix_size(tag) + sizeof(slc_pccc_write_cmd_req) + (size_t)(unsigned int)tag->encoded_name_size + 1;
 
         int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
@@ -2331,22 +2303,9 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        cip_pccc_req *cip_pccc = (cip_pccc_req *)(req->data);
-        pccc_rmw_cmd_req *pccc_cmd = (pccc_rmw_cmd_req *)(cip_pccc + 1);
-        embed_start = (uint8_t *)(&cip_pccc->service_code);
-
-        /* fill in CIP/PCCC header fields */
-        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
-        cip_pccc->req_path_size = 2;
-        cip_pccc->req_path[0] = 0x20;
-        cip_pccc->req_path[1] = 0x67;
-        cip_pccc->req_path[2] = 0x24;
-        cip_pccc->req_path[3] = 0x01;
-
-        cip_pccc->request_id_size =
-            (uint8_t)(sizeof(cip_pccc->request_id_size) + sizeof(cip_pccc->vendor_id) + sizeof(cip_pccc->vendor_serial_number));
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        uint8_t *cmd_start = pccc_write_prefix(tag, req->data);
+        embed_start = req->data;
+        pccc_rmw_cmd_req *pccc_cmd = (pccc_rmw_cmd_req *)cmd_start;
 
         /* fill in PCCC command fields */
         pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -2404,7 +2363,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
 
         /* set request size */
         req->request_size = (int)cip_request_size;
-        req->connected = false;
+        req->connected = (tag->session->is_dhp != 0); /* DH+ goes over the bridge's connection. */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
@@ -2450,32 +2409,22 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
  * Fragments are not supported.
  */
 int pccc_check_write_status(ab_tag_p tag) {
-    pccc_resp *pccc = NULL;
+    pccc_cmd_resp *pccc = NULL;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    rc = pccc_check_response_header(tag, false);
+    rc = pccc_check_response_header(tag, (uint8_t **)&pccc);
     if(rc != PLCTAG_STATUS_OK) {
         ab_tag_abort_request(tag);
         tag->write_in_progress = 0;
         return rc;
     }
 
-    /* the request reference is valid. */
-
-    pccc = (pccc_resp *)(tag->req->data);
-
     uint8_t *data_end = tag->req->data + tag->req->request_size;
 
     /* fake exception */
     do {
-        if(pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d", pccc->general_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(pccc->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
@@ -2495,945 +2444,5 @@ int pccc_check_write_status(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
 
     /* Success! */
-    return rc;
-}
-
-
-//==================================================================
-// DH+ PCCC-specific functions
-//==================================================================
-
-
-/*
- * tag_status
- *
- * PCCC/DH+-specific status.  This functions as a "tickler" routine
- * to check on the completion of async requests.
- */
-int pccc_dhp_tag_status(ab_tag_p tag) {
-    if(!tag->session) {
-        /* this is not OK.  This is fatal! */
-        return PLCTAG_ERR_CREATE;
-    }
-
-    if(tag->read_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    if(tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    return tag->status;
-}
-
-
-int pccc_dhp_tag_tickler(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
-    if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Read in progress.");
-        rc = pccc_dhp_check_read_status(tag);
-        tag->status = (int8_t)rc;
-
-        /* check to see if the read finished. */
-        if(!tag->read_in_progress) {
-            /* read done so create done. */
-            if(tag->first_read) {
-                tag->first_read = 0;
-                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
-            }
-
-            tag->read_complete = 1;
-        }
-
-        return rc;
-    }
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Write in progress.");
-        rc = pccc_dhp_check_write_status(tag);
-        tag->status = (int8_t)rc;
-
-        /* check to see if the write finished. */
-        if(!tag->write_in_progress) { tag->write_complete = 1; }
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return tag->status;
-}
-
-
-/*
- * tag_read_start
- *
- * Start a PCCC tag read (PLC5).
- */
-
-int pccc_dhp_tag_read_start(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
-    ab_request_p req = NULL;
-    uint8_t *data = NULL;
-    uint8_t *embed_start = NULL;
-    int cip_payload_space = session_get_available_cip_payload_space(tag->session);
-
-    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
-    tag->req_pccc_seq_num = conn_seq_id;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
-
-    /* pseudo-exception block for error handling */
-    do {
-        /* check for busy */
-        if(tag->read_in_progress || tag->write_in_progress) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-            rc = PLCTAG_ERR_BUSY;
-            break;
-        }
-
-        tag->read_in_progress = 1;
-
-        /* calculate response overhead and available payload space */
-        int response_overhead = sizeof(pccc_dhp_cmd_resp);
-        int response_payload_space = cip_payload_space - response_overhead;
-
-        if(response_payload_space < 0) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "PLC5 read response overhead (%d bytes) exceeds session payload space (%d bytes).", response_overhead,
-                   cip_payload_space);
-            tag->read_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        if(response_payload_space < tag->size) {
-            pdebug(
-                DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                "Tag size (%d bytes) exceeds available response data space (%d bytes). DH+ PCCC does not support fragmentation.",
-                tag->size, response_payload_space);
-            tag->read_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /* calculate request overhead */
-        int request_overhead =
-            (int)sizeof(pccc_dhp_routing_header)
-            + (int)(tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_read_cmd_req) : sizeof(slc_pccc_read_cmd_req))
-            + tag->encoded_name_size + 1;
-
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id,
-               "PLC5 request overhead: PCCC read command header size %zu, encoded_name=%d, data_size=1, total=%d bytes",
-               (tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_read_cmd_req) : sizeof(slc_pccc_read_cmd_req)),
-               tag->encoded_name_size, request_overhead);
-
-        int request_payload_space = cip_payload_space - request_overhead;
-
-        if(request_payload_space < 0) {
-            pdebug(
-                DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id,
-                "PLC5 read request overhead (%d bytes) exceeds session payload space (%d bytes). Tag name too long or PCCC packet limit exceeded.",
-                request_overhead, cip_payload_space);
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /* create the request */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-            break;
-        }
-
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Request created. Request capacity: %d bytes",
-               req->request_capacity);
-
-        if(request_overhead > req->request_capacity) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id,
-                   "DH+ PCCC request overhead (%d bytes) exceeds request capacity (%d bytes).", request_overhead,
-                   req->request_capacity);
-            rc_dec(req);
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /* point the struct pointers to the buffer */
-        pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(req->data);
-        embed_start = (uint8_t *)(req->data);
-
-        /* fill in DH+ fields */
-        dhp_routing->dest_link = h2le16(0);
-        dhp_routing->dest_node = h2le16(tag->session->dhp_dest);
-        dhp_routing->src_link = h2le16(0);
-        dhp_routing->src_node = h2le16(0);
-
-        if(tag->plc_type == AB_PLC_PLC5) {
-            plc5_pccc_read_cmd_req *pccc_cmd = (plc5_pccc_read_cmd_req *)(dhp_routing + 1);
-
-            pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-            pccc_cmd->pccc_status = 0;
-            pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
-            pccc_cmd->pccc_function = AB_EIP_PLC5_RANGE_READ_FUNC;
-            pccc_cmd->pccc_offset = h2le16(0);
-            pccc_cmd->pccc_transfer_size = h2le16((uint16_t)(tag->size / 2));
-
-            /* point data pointer just past the fixed data fields */
-            data = (uint8_t *)(pccc_cmd + 1);
-        } else {
-            slc_pccc_read_cmd_req *pccc_cmd = (slc_pccc_read_cmd_req *)(dhp_routing + 1);
-
-            pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-            pccc_cmd->pccc_status = 0;
-            pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
-            pccc_cmd->pccc_function = AB_EIP_SLC_RANGE_READ_FUNC;
-            pccc_cmd->pccc_transfer_size = (uint8_t)tag->size;
-
-            /* point data pointer just past the fixed data fields */
-            data = (uint8_t *)(pccc_cmd + 1);
-        }
-
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request PCCC data 1:");
-        pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)(data - req->data));
-
-        /* copy encoded tag name into the request */
-        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-        data += tag->encoded_name_size;
-
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request PCCC data 2:");
-        pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)(data - req->data));
-
-        if(tag->plc_type == AB_PLC_PLC5) {
-            /* add data size byte */
-            *data = (uint8_t)(tag->size);
-            data++;
-        }
-
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request PCCC data 3:");
-        pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)(data - req->data));
-
-        /* debug: request full data length */
-        ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request full data length: %td bytes.",
-               calculated_request_size);
-
-        /* debug: CIP data length */
-        ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request CIP data length: %td bytes.", cip_request_size);
-
-
-
-
-        /* set request size */
-        req->request_size = (int)cip_request_size;
-        req->connected = true;
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request size set to %d bytes.", req->request_size);
-
-        /* debug: dump request data */
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request data:");
-        pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)calculated_request_size);
-
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-            break;
-        }
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    /* set tag->req if successful, else clean up */
-    if(rc == PLCTAG_STATUS_OK) {
-        critical_block(&tag->api_mutex) {
-            if(tag->req) {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
-                rc = PLCTAG_ERR_BAD_DATA;
-            } else {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Setting request for tag %d", tag->tag_id);
-                tag->req = req;
-                rc = PLCTAG_STATUS_PENDING;
-            }
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new read request rc=%s",
-               plc_tag_decode_error(rc));
-        tag->read_in_progress = 0;
-        req = rc_dec(req);
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
-    return rc;
-}
-
-
-/*
- * check_read_status
- *
- * NOTE that we can have only one outstanding request because PCCC
- * does not support fragments.
- */
-int pccc_dhp_check_read_status(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
-
-    rc = pccc_check_response_header(tag, true);
-    if(rc != PLCTAG_STATUS_OK) {
-        ab_tag_abort_request(tag);
-        tag->read_in_progress = 0;
-        tag->read_complete = 1;
-        return rc;
-    }
-
-    /* get the header pointers */
-    pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(tag->req->data);
-
-    uint8_t *data = (uint8_t *)(pccc_cmd + 1);
-    uint8_t *data_end = tag->req->data + tag->req->request_size;
-
-    /* fake exceptions */
-    do {
-        if(pccc_cmd->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc_cmd->pccc_status,
-                   pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
-            rc = pccc_status_to_rc(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end));
-            break;
-        }
-
-        /* did we get the right amount of data? */
-        if((data_end - data) != (ptrdiff_t)tag->size) {
-            if((data_end - data) > (ptrdiff_t)tag->size) {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                       "Too much data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
-                rc = PLCTAG_ERR_TOO_LARGE;
-            } else {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                       "Too little data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
-                rc = PLCTAG_ERR_TOO_SMALL;
-            }
-            break;
-        }
-
-        /* copy data into the tag. */
-        mem_copy(tag->data, data, (int)(data_end - data));
-
-        tag->read_in_progress = 0;
-        tag->read_complete = 1;
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    ab_tag_abort_request(tag);
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
-
-    return rc;
-}
-
-
-int pccc_dhp_tag_write_start(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
-    uint8_t *data = NULL;
-    uint8_t *embed_start = NULL;
-    size_t overhead, data_per_packet;
-
-    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
-    tag->req_pccc_seq_num = conn_seq_id;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->is_bit) {
-        if(tag->plc_type == AB_PLC_PLC5) {
-            return plc5_dhp_tag_write_bit_start(tag);
-        } else {
-            return slc_dhp_tag_write_bit_start(tag);
-        }
-    }
-
-    do {
-        /* check for busy */
-        if(tag->read_in_progress || tag->write_in_progress) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read (%d) or write (%d) operation already in flight!",
-                   tag->read_in_progress, tag->write_in_progress);
-            rc = PLCTAG_ERR_BUSY;
-            break;
-        }
-
-        tag->write_in_progress = 1;
-
-        /* How much overhead? */
-        overhead = sizeof(pccc_dhp_routing_header)
-                   + (tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_write_cmd_req) : sizeof(slc_pccc_write_cmd_req))
-                   + (size_t)tag->encoded_name_size;
-
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
-
-        if(session_payload_space <= 0) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to get valid payload space from session. Available payload: %d bytes", session_payload_space);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /*
-         * The payload space comes from the connection size the PLC negotiated in the
-         * ForwardOpen response, so it can be smaller than our overhead.  Compare before
-         * subtracting: data_per_packet is unsigned, so an underflow here would wrap to a
-         * huge value that passes every check below.
-         */
-        if((size_t)session_payload_space <= overhead) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
-                   session_payload_space);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        data_per_packet = (size_t)session_payload_space - overhead;
-
-        if(data_per_packet < (size_t)tag->size) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag size is %d, write overhead is %zu, and write data per packet is %zu.", tag->size, overhead,
-                   data_per_packet);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-            tag->write_in_progress = 0;
-            break;
-        }
-
-        /* point the struct pointers to the buffer */
-        pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(req->data);
-        embed_start = (uint8_t *)(req->data);
-
-        /* fill in DH+ fields */
-        dhp_routing->dest_link = h2le16(0);
-        dhp_routing->dest_node = h2le16(tag->session->dhp_dest);
-        dhp_routing->src_link = h2le16(0);
-        dhp_routing->src_node = h2le16(0);
-
-        if(tag->plc_type == AB_PLC_PLC5) {
-            plc5_pccc_write_cmd_req *pccc_cmd = (plc5_pccc_write_cmd_req *)(dhp_routing + 1);
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "Using PLC5 PCCC write command request structure.");
-
-            /* fill in PCCC command fields */
-            pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-            pccc_cmd->pccc_status = 0;
-            pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
-            pccc_cmd->pccc_function = AB_EIP_PLC5_RANGE_WRITE_FUNC;
-            pccc_cmd->pccc_offset = h2le16(0);
-            pccc_cmd->pccc_transfer_size = h2le16((uint16_t)(tag->size / 2));
-
-            /* point data pointer just past the fixed data fields */
-            data = (uint8_t *)(pccc_cmd + 1);
-        } else {
-            slc_pccc_write_cmd_req *pccc_cmd = (slc_pccc_write_cmd_req *)(dhp_routing + 1);
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "Using SLC PCCC write command request structure.");
-
-            /* fill in PCCC command fields */
-            pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-            pccc_cmd->pccc_status = 0;
-            pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
-            pccc_cmd->pccc_function = AB_EIP_SLC_RANGE_WRITE_FUNC;
-            pccc_cmd->pccc_transfer_size = (uint8_t)tag->size;
-
-            /* point data pointer just past the fixed data fields */
-            data = (uint8_t *)(pccc_cmd + 1);
-        }
-
-        /* copy encoded tag name into the request */
-        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-        data += tag->encoded_name_size;
-
-        /* now copy the data to write */
-        mem_copy(data, tag->data, tag->size);
-        data += tag->size;
-
-        /* debug: request full data length */
-        ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request full data length: %td bytes.",
-               calculated_request_size);
-
-        /* debug: dump request data */
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request data:");
-        pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)calculated_request_size);
-
-        /* debug: CIP data length */
-        ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request CIP data length: %td bytes.",
-               cip_request_size);
-
-
-
-
-
-        /* set request size */
-        req->request_size = (int)cip_request_size;
-        req->connected = true;
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request size set to %d bytes.",
-               req->request_size);
-
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
-            break;
-        }
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    /* set tag->req if successful, else clean up */
-    if(rc == PLCTAG_STATUS_OK) {
-        critical_block(&tag->api_mutex) {
-            if(tag->req) {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
-                rc = PLCTAG_ERR_BAD_DATA;
-            } else {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Setting write request for tag %d", tag->tag_id);
-                tag->req = req;
-                rc = PLCTAG_STATUS_PENDING;
-            }
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new write request rc=%s",
-               plc_tag_decode_error(rc));
-        req = rc_dec(req);
-        tag->write_in_progress = 0;
-        tag->write_complete = 1;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
-    return rc;
-}
-
-int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
-    uint8_t *data = NULL;
-    uint8_t *embed_start = NULL;
-    size_t overhead = 0;
-    int data_per_packet = 0;
-
-    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
-    tag->req_pccc_seq_num = conn_seq_id;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    do {
-        /* check for busy */
-        if(tag->read_in_progress || tag->write_in_progress) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read (%d) or write (%d) operation already in flight!",
-                   tag->read_in_progress, tag->write_in_progress);
-            rc = PLCTAG_ERR_BUSY;
-            break;
-        }
-
-        tag->write_in_progress = 1;
-
-        /* How much overhead? */
-        overhead = sizeof(pccc_dhp_rmw_cmd_req) + (size_t)tag->encoded_name_size
-                   + (size_t)(tag->elem_size * 2); /* AND/OR masks */
-
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
-
-        if(session_payload_space <= 0) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to get valid payload space from session. Available payload: %d bytes", session_payload_space);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        data_per_packet = session_payload_space - (int)overhead;
-
-        if(data_per_packet < 0) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
-                   session_payload_space);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /* check if we can fit the AND/OR masks in the packet */
-        if(data_per_packet < (int)(tag->elem_size * 2)) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag elem_size is %d, write overhead is %zu, and write data per packet is %zu.", tag->elem_size, overhead,
-                   data_per_packet);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-            tag->write_in_progress = 0;
-            break;
-        }
-
-        /* stack the struct pointers as in tag_read_start */
-        pccc_dhp_rmw_cmd_req *pccc_cmd = (pccc_dhp_rmw_cmd_req *)(req->data);
-        embed_start = (uint8_t *)(req->data);
-
-        /* point data pointer just past the fixed data fields */
-        data = (uint8_t *)(pccc_cmd + 1);
-
-        /* copy encoded tag name into the request */
-        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-        data += tag->encoded_name_size;
-
-        /* AND/reset mask */
-        for(int i = 0; i < tag->elem_size; i++) {
-            if((tag->bit / 8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-                if(tag->data[i] & mask) {
-                    *data = (uint8_t)0xFF;
-                } else {
-                    *data = (uint8_t)~mask;
-                }
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "adding reset mask byte %d: %x", i, *data);
-                data++;
-            } else {
-                *data = (uint8_t)0xFF;
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "adding reset mask byte %d: %x", i, *data);
-                data++;
-            }
-        }
-        /* OR/set mask */
-        for(int i = 0; i < tag->elem_size; i++) {
-            if((tag->bit / 8) == i) {
-                *data = tag->data[i] & (uint8_t)(1 << (tag->bit % 8));
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "adding set mask byte %d: %x", i, *data);
-                data++;
-            } else {
-                *data = (uint8_t)0x00;
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "adding set mask byte %d: %x", i, *data);
-                data++;
-            }
-        }
-
-        /* debug: request full data length */
-        ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request full data length: %td bytes.",
-               calculated_request_size);
-
-        /* debug: dump request data */
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request data:");
-        pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)calculated_request_size);
-
-        /* debug: CIP data length */
-        ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request CIP data length: %td bytes.",
-               cip_request_size);
-
-        /* fill in DH+ fields */
-        pccc_cmd->dest_link = h2le16(0);
-        pccc_cmd->dest_node = h2le16(tag->session->dhp_dest);
-        pccc_cmd->src_link = h2le16(0);
-        pccc_cmd->src_node = h2le16(0);
-
-        /* fill in PCCC command fields */
-        pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-        pccc_cmd->pccc_status = 0;
-        pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
-        pccc_cmd->pccc_function = AB_EIP_PLC5_RMW_FUNC;
-
-
-
-
-        /* set request size */
-        req->request_size = (int)cip_request_size;
-        req->connected = true;
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request size set to %d bytes.",
-               req->request_size);
-
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add bit write request to session! rc=%d", rc);
-            break;
-        }
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    /* set tag->req if successful, else clean up */
-    if(rc == PLCTAG_STATUS_OK) {
-        critical_block(&tag->api_mutex) {
-            if(tag->req) {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
-                rc = PLCTAG_ERR_BAD_DATA;
-            } else {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Setting bit write request for tag %d", tag->tag_id);
-                tag->req = req;
-                rc = PLCTAG_STATUS_PENDING;
-            }
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new bit write request rc=%s",
-               plc_tag_decode_error(rc));
-        req = rc_dec(req);
-        tag->write_in_progress = 0;
-        tag->write_complete = 1;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return rc;
-}
-
-int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
-    uint8_t *data = NULL;
-    uint8_t *embed_start = NULL;
-    size_t overhead = 0;
-    int data_per_packet = 0;
-
-    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
-    tag->req_pccc_seq_num = conn_seq_id;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    do {
-        /* check for busy */
-        if(tag->read_in_progress || tag->write_in_progress) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read (%d) or write (%d) operation already in flight!",
-                   tag->read_in_progress, tag->write_in_progress);
-            rc = PLCTAG_ERR_BUSY;
-            break;
-        }
-
-        /* the mask is only 16 bits. */
-        if(tag->size != 2 || tag->elem_size != 2) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unsupported tag size or element size: %d, %d", tag->size,
-                   tag->elem_size);
-            rc = PLCTAG_ERR_UNSUPPORTED;
-            break;
-        }
-
-        tag->write_in_progress = 1;
-
-        /* How much overhead? */
-        overhead = sizeof(pccc_dhp_routing_header) + sizeof(slc_pccc_write_cmd_req)
-                   + (size_t)tag->encoded_name_size + (size_t)(tag->elem_size) + 2; /* the mask */
-
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
-
-        if(session_payload_space <= 0) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to get valid payload space from session. Available payload: %d bytes", session_payload_space);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        data_per_packet = session_payload_space - (int)overhead;
-
-        if(data_per_packet < 0) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
-                   session_payload_space);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /* check if we can fit the AND/OR masks in the packet */
-        if(data_per_packet < (int)(tag->elem_size * 2)) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag elem_size is %d, write overhead is %zu, and write data per packet is %zu.", tag->elem_size, overhead,
-                   data_per_packet);
-            tag->write_in_progress = 0;
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-            tag->write_in_progress = 0;
-            break;
-        }
-
-        /* stack the struct pointers as in tag_read_start */
-        pccc_dhp_rmw_cmd_req *pccc_cmd = (pccc_dhp_rmw_cmd_req *)(req->data);
-        embed_start = (uint8_t *)(req->data);
-
-        /* point data pointer just past the fixed data fields */
-        data = (uint8_t *)(pccc_cmd + 1);
-
-        /* Add the transfer size. */
-        *data = (uint8_t)(tag->size & 0xFF);
-        data++;
-
-        /* copy encoded tag name into the request */
-        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-        data += tag->encoded_name_size;
-
-        /* The mask has bits set where the data will change the data file. */
-        for(int i = 0; i < tag->elem_size; i++) {
-            if((tag->bit / 8) == i) {
-                *data = (uint8_t)(1 << (tag->bit % 8));
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "adding mask byte %d: %x", i, *data);
-                data++;
-            } else {
-                *data = (uint8_t)0x00;
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "adding mask byte %d: %x", i, *data);
-                data++;
-            }
-        }
-
-        /* the set mask */
-        for(int i = 0; i < tag->elem_size; i++) {
-            *data = tag->data[i];
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "adding set byte %d: %x", i, *data);
-            data++;
-        }
-
-        /* debug: request full data length */
-        ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ SLC bit write request full data length: %td bytes.",
-               calculated_request_size);
-
-        /* debug: dump request data */
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ SLC bit write request data:");
-        pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)calculated_request_size);
-
-        /* debug: CIP data length */
-        ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ SLC bit write request CIP data length: %td bytes.",
-               cip_request_size);
-
-        /* fill in DH+ fields */
-        pccc_cmd->dest_link = h2le16(0);
-        pccc_cmd->dest_node = h2le16(tag->session->dhp_dest);
-        pccc_cmd->src_link = h2le16(0);
-        pccc_cmd->src_node = h2le16(0);
-
-        /* fill in PCCC command fields */
-        pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-        pccc_cmd->pccc_status = 0;
-        pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
-        pccc_cmd->pccc_function = AB_EIP_SLC_RANGE_WRITE_MASK_FUNC;
-
-
-
-
-        /* set request size */
-        req->request_size = (int)cip_request_size;
-        req->connected = true;
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request size set to %d bytes.",
-               req->request_size);
-
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add bit write request to session! rc=%d", rc);
-            break;
-        }
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    /* set tag->req if successful, else clean up */
-    if(rc == PLCTAG_STATUS_OK) {
-        critical_block(&tag->api_mutex) {
-            if(tag->req) {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Request already set! This should not happen!");
-                rc = PLCTAG_ERR_BAD_DATA;
-            } else {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Setting bit write request for tag %d", tag->tag_id);
-                tag->req = req;
-                rc = PLCTAG_STATUS_PENDING;
-            }
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new bit write request rc=%s",
-               plc_tag_decode_error(rc));
-        req = rc_dec(req);
-        tag->write_in_progress = 0;
-        tag->write_complete = 1;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
-    return rc;
-}
-
-
-/*
- * check_write_status
- *
- * Fragments are not supported.
- */
-int pccc_dhp_check_write_status(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = pccc_check_response_header(tag, true);
-    if(rc != PLCTAG_STATUS_OK) {
-        ab_tag_abort_request(tag);
-        tag->write_in_progress = 0;
-        return rc;
-    }
-
-    /* the request reference is valid. */
-
-    /* get the header pointers */
-    pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(tag->req->data);
-
-    uint8_t *data_end = tag->req->data + tag->req->request_size;
-
-    /* fake exceptions */
-    do {
-        if(pccc_cmd->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc_cmd->pccc_status,
-                   pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
-            rc = pccc_status_to_rc(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end));
-            break;
-        }
-
-        tag->write_in_progress = 0;
-        tag->write_complete = 1;
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    ab_tag_abort_request(tag);
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
-
     return rc;
 }

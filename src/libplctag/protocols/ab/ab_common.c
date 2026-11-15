@@ -44,9 +44,7 @@
 #include <libplctag/protocols/ab/eip_cip.h>
 #include <libplctag/protocols/ab/eip_cip_special.h>
 #include <libplctag/protocols/ab/eip_lgx_pccc.h>
-#include <libplctag/protocols/ab/eip_plc5_dhp.h>
 #include <libplctag/protocols/ab/eip_plc5_pccc.h>
-#include <libplctag/protocols/ab/eip_slc_dhp.h>
 #include <libplctag/protocols/ab/eip_slc_pccc.h>
 #include <libplctag/protocols/ab/omron_listing.h>
 #include <libplctag/protocols/ab/pccc.h>
@@ -537,7 +535,7 @@ int pccc_plc_tag_create(ab_tag_p tag, attr attribs, bool from_src) {
 
     switch(tag->plc_type) {
         case AB_PLC_PLC5:
-            tag->vtable = is_dhp ? &eip_plc5_dhp_vtable : &plc5_vtable;
+            tag->vtable = &plc5_vtable;
             if(!tag->byte_order || !tag->byte_order->is_allocated) { tag->byte_order = &plc5_tag_byte_order; }
             break;
 
@@ -548,7 +546,7 @@ int pccc_plc_tag_create(ab_tag_p tag, attr attribs, bool from_src) {
             break;
 
         default: /* SLC and MicroLogix */
-            tag->vtable = is_dhp ? &eip_slc_dhp_vtable : &slc_vtable;
+            tag->vtable = &slc_vtable;
             if(!tag->byte_order || !tag->byte_order->is_allocated) { tag->byte_order = &slc_tag_byte_order; }
             break;
     }
