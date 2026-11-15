@@ -107,9 +107,8 @@ typedef struct cip_plc_type_t {
 
     /* the session */
     int32_t max_msg_size;
-    int32_t fo_conn_size;
-    int32_t fo_ex_conn_size;
-    bool only_use_old_forward_open;
+    int32_t fo_conn_size;    /* the plain Forward Open size, and the unconnected one */
+    int32_t fo_ex_conn_size; /* the largest Large Forward Open size; 0 for a PLC without it */
 
     /* tag defaults: 0 never connected, 1 always, -1 the use_connected_msg attribute, default on. */
     int8_t connected;

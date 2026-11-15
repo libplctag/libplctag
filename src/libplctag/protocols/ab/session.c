@@ -77,12 +77,6 @@ static uint8_t cip_router_path[] = {0x20, 0x02, 0x24, 0x01};
 /* the largest connection the plain Forward Open can ask for. */
 #define CIP_FO_PLAIN_MAX_SIZE (504)
 
-/* extended status for a network link that is down: maintenance, not a wrong route. */
-#define CIP_EXT_ERR_LINK_OFFLINE (0x0800)
-
-/* extended status for a connection size the PLC will not grant. */
-#define CIP_EXT_ERR_INVALID_CONN_SIZE (0x0109)
-
 /* Idle timeout.  One second less than that negotiated with the PLC. */
 #define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
 #define SOCKET_WAIT_TIMEOUT_MS (20)
@@ -106,10 +100,6 @@ static uint8_t cip_router_path[] = {0x20, 0x02, 0x24, 0x01};
          MIN_PAYLOAD_SIZE_PCCC :                                                                                    \
          MIN_PAYLOAD_SIZE_CIP)
 
-/* make sure we try hard to get a good payload size */
-#define GET_MAX_PAYLOAD_SIZE(session)                                \
-    ((session->max_payload_size > 0) ? (session->max_payload_size) : \
-                                       ((session->fo_conn_size > 0) ? (session->fo_conn_size) : (session->fo_ex_conn_size)))
 
 
 /*
@@ -127,6 +117,17 @@ typedef struct {
     bool want_reply;
     int32_t rc; /* why it failed */
 } exchange_t;
+
+
+/* the Forward Open sub-machine's state; reset when the phase ends, either way. */
+typedef enum { FO_START = 0, FO_BUILD, FO_EXCHANGE } fo_state_t;
+
+typedef struct {
+    fo_state_t state;
+    uint16_t size;       /* the connection size being asked for */
+    bool offered_tried;  /* a size the PLC offered has been tried */
+    uint32_t dup_tries;  /* duplicate connection IDs refused in a row */
+} fo_neg_t;
 
 
 /* plc-specific session constructors */
@@ -173,11 +174,10 @@ static int perform_forward_close(cip_conn_p session);
 // static int recv_forward_open_resp(cip_conn_p session, int *max_payload_size_guess);
 static int send_forward_close_req(cip_conn_p session);
 static int recv_forward_close_resp(cip_conn_p session);
-static int send_forward_open_request(cip_conn_p session);
 static uint16_t next_conn_serial_number(uint16_t current);
-static int send_old_forward_open_request(cip_conn_p session);
-static int send_extended_forward_open_request(cip_conn_p session);
-static int receive_forward_open_response(cip_conn_p session);
+static void encode_forward_open(cip_conn_p session, bool large);
+static void encode_plain_forward_open(cip_conn_p session);
+static void encode_large_forward_open(cip_conn_p session);
 static void request_destroy(void *req_arg);
 static int session_request_increase_buffer(ab_request_p request, int new_capacity);
 static inline void session_publish_event(cip_conn_p session, int32_t event_type, int32_t status, int32_t reason);
@@ -332,7 +332,7 @@ int session_get_max_payload(cip_conn_p session) {
         return 0;
     }
 
-    critical_block(&session->session_mutex) { result = GET_MAX_PAYLOAD_SIZE(session); }
+    critical_block(&session->session_mutex) { result = session->max_payload_size; }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "max payload size is %d bytes.", result);
 
@@ -348,12 +348,10 @@ int session_get_available_cip_payload_space(cip_conn_p session) {
     }
 
     critical_block(&session->session_mutex) {
-        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+        int max_payload_size = session->max_payload_size;
         result = max_payload_size;
 
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-               "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
-               session->max_payload_size, session->fo_conn_size, session->fo_ex_conn_size, max_payload_size);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session payload calculation: max_payload_size=%d", max_payload_size);
 
         // Account for CPF data item overhead
         if(session->use_connected_msg) {
@@ -1172,8 +1170,7 @@ typedef enum {
     SESSION_OPEN_SOCKET_WAIT,
     SESSION_REGISTER,
     SESSION_IDENTIFY,
-    SESSION_SEND_FORWARD_OPEN,
-    SESSION_RECEIVE_FORWARD_OPEN,
+    SESSION_FORWARD_OPEN,
     SESSION_IDLE,
     SESSION_DISCONNECT,
     SESSION_UNREGISTER,
@@ -1194,7 +1191,10 @@ typedef struct session_sm_s {
     int64_t retry_wait_ms;
     int auto_disconnect;
     exchange_t ex; /* the exchange in flight, if any */
+    fo_neg_t fo;   /* the Forward Open negotiation */
 } session_sm_t;
+
+static int fo_step(cip_conn_p session, session_sm_t *sm);
 
 static void generic_step(cip_conn_p session, session_sm_t *sm);
 static void logix_step(cip_conn_p session, session_sm_t *sm);
@@ -1213,10 +1213,9 @@ void session_setup_pccc(cip_conn_p conn) { conn->step = conn->is_dhp ? generic_s
 /* copy what the PLC type sets on its connection, then let it install its state machine. */
 static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc) {
     session->plc_type = plc->id;
-    session->only_use_old_forward_open = plc->only_use_old_forward_open;
-    session->fo_conn_size = plc->fo_conn_size;
-    session->fo_ex_conn_size = plc->fo_ex_conn_size;
-    session->max_payload_size = (uint16_t)session->fo_conn_size;
+    /* the attribute can only add the restriction, never lift it from a type without the Large FO. */
+    if(plc->fo_ex_conn_size == 0) { session->only_use_old_forward_open = true; }
+    session->max_payload_size = (uint16_t)plc->fo_conn_size;
     plc->setup_conn(session);
 }
 
@@ -1313,115 +1312,216 @@ static void fail_queued_requests(cip_conn_p session) {
 static const uint16_t forward_open_size_ladder[] = {4002, 1900, 504, 500, 244, 92};
 
 
-/*
- * Drop to the next connection size worth asking for.  False when there is none left.  A size the
- * PLC offers is a ceiling, not an answer: Logix v32 and later has offered 4002 and then refused it.
- */
-static bool forward_open_step_size_down(cip_conn_p session) {
-    uint16_t limit = (session->max_payload_guess > 0 ? (uint16_t)(session->max_payload_guess - 1) : 0);
-
-    if(session->fo_offered_size > 0 && session->fo_offered_size < limit) { limit = session->fo_offered_size; }
-
+/* the next ladder size at or below ceiling that still clears this protocol's minimum; 0 if none. */
+static uint16_t fo_next_size_down(cip_conn_p session, uint16_t ceiling) {
     for(size_t i = 0; i < sizeof(forward_open_size_ladder) / sizeof(forward_open_size_ladder[0]); i++) {
         uint16_t size = forward_open_size_ladder[i];
 
-        if(size > limit) { continue; }
+        if(size > ceiling) { continue; }
 
         if(size < MIN_PAYLOAD_SIZE(session)) { break; }
 
-        critical_block(&session->session_mutex) { session->max_payload_guess = size; }
-
-        /* the size decides the service: only the extended Forward Open carries a large one. */
-        if(size <= CIP_FO_PLAIN_MAX_SIZE) { session->only_use_old_forward_open = 1; }
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Retrying the Forward Open at %u bytes using the %s service.",
-               (unsigned int)size, (session->only_use_old_forward_open ? "plain" : "extended"));
-
-        return true;
+        return size;
     }
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-           "No connection size left to try at or below %u bytes that still clears the %d bytes this protocol needs "
-           "for a single request!",
-           (unsigned int)limit, MIN_PAYLOAD_SIZE(session));
-
-    return false;
+    return 0;
 }
 
 
 /*
- * A refusal no further attempt can get past: a wrong route, or a device without connected
- * messaging.  Not a link that is offline (0x0800), which maps to the same error but is a PLC
- * down for maintenance, and not running out of sizes, which a PLC still starting up causes.
+ * The Forward Open phase.  PLCTAG_STATUS_PENDING while it runs, PLCTAG_STATUS_OK with the
+ * connection open, or why it gave up; the reason is also in connection_status_reason.
+ *
+ * A reply classified by classify_fo_reply() either asks again (new ID, offered size, smaller
+ * size, plain service) or gives up.  A wrong route or no connected messaging is a refusal: no
+ * attempt soon will change it, so it waits the longest and fails the waiting requests.
  */
-static bool forward_open_error_is_configuration(cip_conn_p session, int rc) {
-    if(session->fo_ext_status == CIP_EXT_ERR_LINK_OFFLINE) { return false; }
+static int fo_step(cip_conn_p session, session_sm_t *sm) {
+    fo_neg_t *fo = &sm->fo;
+    eip_forward_open_response_t *resp = NULL;
+    uint8_t *status = NULL;
+    size_t status_size = 0;
+    uint16_t offered = 0;
+    uint16_t ceiling = 0;
+    bool step_down = false;
+    bool refused = false;
+    int rc = PLCTAG_STATUS_OK;
 
-    return (rc == PLCTAG_ERR_BAD_DEVICE || rc == PLCTAG_ERR_BAD_PARAM || rc == PLCTAG_ERR_UNSUPPORTED);
-}
+    switch(fo->state) {
+        case FO_START: {
+            const cip_plc_type_t *plc = ab_plc_type_get(session->plc_type);
+            int32_t size = CIP_FO_PLAIN_MAX_SIZE;
 
+            if(plc) {
+                size = (session->only_use_old_forward_open || plc->fo_ex_conn_size == 0) ? plc->fo_conn_size :
+                                                                                          plc->fo_ex_conn_size;
+            }
 
-/* A reconnect starts the negotiation over, keeping the size the PLC last agreed to. */
-static void forward_open_reset_negotiation(cip_conn_p session) {
-    session->fo_offered_size = 0;
-    session->fo_dup_retries = 0;
-    session->fo_ext_status = 0;
-}
+            fo->size = (uint16_t)size;
+            fo->offered_tried = false;
+            fo->dup_tries = 0;
+            fo->state = FO_BUILD;
+        }
+            /* fall through */
 
+        case FO_BUILD:
+            critical_block(&session->session_mutex) { session->max_payload_guess = fo->size; }
 
-/*
- * After a refused Forward Open: retry inside the session when the request can still change, and
- * otherwise give up on this connect.  Returns the next state.
- */
-static session_state_t forward_open_refused(cip_conn_p session, session_sm_t *sm, int rc) {
-    if(rc == PLCTAG_ERR_DUPLICATE) {
-        session->fo_dup_retries++;
+            /* the size picks the service: only the Large Forward Open carries more than 504 bytes. */
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Forward Open for %u bytes using the %s service.",
+                   (unsigned int)fo->size, (fo->size > CIP_FO_PLAIN_MAX_SIZE ? "Large" : "plain"));
 
-        if(session->fo_dup_retries <= CIP_FO_MAX_DUP_RETRIES) {
+            encode_forward_open(session, fo->size > CIP_FO_PLAIN_MAX_SIZE);
+            exchange_start(session, &sm->ex, true);
+            fo->state = FO_EXCHANGE;
+
+            return PLCTAG_STATUS_PENDING;
+
+        case FO_EXCHANGE: break;
+    }
+
+    switch(exchange_step(session, &sm->ex)) {
+        case EX_PENDING: return PLCTAG_STATUS_PENDING;
+        case EX_FAILED:
+            fo->state = FO_START;
+            atomic_set_int32(&session->connection_status_reason, sm->ex.rc);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Open exchange failed %s!", plc_tag_decode_error(sm->ex.rc));
+            return sm->ex.rc;
+        case EX_DONE: break;
+    }
+
+    resp = (eip_forward_open_response_t *)(session->data);
+
+    /* an error reply stops after the status, so only that much is required here. */
+    if((size_t)session->data_size < offsetof(eip_forward_open_response_t, orig_to_targ_conn_id)) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Open response of %u bytes is too short to hold the CIP status!",
+               session->data_size);
+        fo->state = FO_START;
+        atomic_set_int32(&session->connection_status_reason, PLCTAG_ERR_TOO_SMALL);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    status = &resp->general_status;
+    status_size = cip_error_data_size(status, session->data + session->data_size);
+
+    if(resp->general_status != AB_EIP_OK) {
+        uint16_t extended = (uint16_t)((status_size >= 4 && status[1] >= 1) ? (status[2] | (status[3] << 8)) : 0);
+
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Open failed: %s (0x%02x/0x%04x) -- %s",
+               decode_cip_error_short(status, status_size), resp->general_status, extended,
+               decode_cip_error_long(status, status_size));
+    }
+
+    switch(classify_fo_reply(status, status_size, &offered)) {
+        case FO_ACCEPTED:
+            if((size_t)session->data_size < sizeof(*resp)) {
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                       "Successful Forward Open response of %u bytes is too short to hold the connection data!",
+                       session->data_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
+
+            session->targ_connection_id = le2h32(resp->orig_to_targ_conn_id);
+            session->orig_connection_id = le2h32(resp->targ_to_orig_conn_id);
+
+            critical_block(&session->session_mutex) { session->max_payload_size = session->max_payload_guess; }
+
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0,
+                   "Forward Open succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
+                   session->orig_connection_id, session->targ_connection_id, session->max_payload_size);
+
+            fo->state = FO_START;
+            atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
+            return PLCTAG_STATUS_OK;
+
+        case FO_DUP_ID:
             /* the serial number changes on every encode, so asking again is enough. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Duplicate connection ID, retry %" PRIu32 " of %d with a new one.",
-                   session->fo_dup_retries, CIP_FO_MAX_DUP_RETRIES);
-            return SESSION_SEND_FORWARD_OPEN;
-        }
+            if(++fo->dup_tries <= CIP_FO_MAX_DUP_RETRIES) {
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Duplicate connection ID, retry %" PRIu32 " of %d with a new one.",
+                       fo->dup_tries, CIP_FO_MAX_DUP_RETRIES);
+                fo->state = FO_BUILD;
+                break;
+            }
 
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "The PLC refused %d connection IDs in a row; it has no connection to give us.",
-               CIP_FO_MAX_DUP_RETRIES);
-        rc = PLCTAG_ERR_NO_RESOURCES;
-    } else if(rc == PLCTAG_ERR_TOO_LARGE || rc == PLCTAG_ERR_NO_RESOURCES) {
-        /*
-         * A smaller request for both: some firmware answers an oversized request with "no
-         * resources", and a device at its connection limit can still have room for a small one.
-         */
-        if(forward_open_step_size_down(session)) { return SESSION_SEND_FORWARD_OPEN; }
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "The PLC refused %d connection IDs in a row; it has no connection to give us.", CIP_FO_MAX_DUP_RETRIES);
+            rc = PLCTAG_ERR_NO_RESOURCES;
+            break;
 
-        rc = PLCTAG_ERR_TOO_SMALL;
-    } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
-        if(!session->only_use_old_forward_open) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "PLC does not support the extended Forward Open, trying the plain one.");
-            session->only_use_old_forward_open = 1;
-            return SESSION_SEND_FORWARD_OPEN;
-        }
+        case FO_SIZE_REFUSED:
+            /* an offer is tried once; Logix v32 has offered a size and then refused it. */
+            if(offered >= MIN_PAYLOAD_SIZE(session) && offered < fo->size && !fo->offered_tried) {
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "The PLC offered %u bytes.", (unsigned int)offered);
+                fo->offered_tried = true;
+                fo->size = offered;
+                fo->state = FO_BUILD;
+                break;
+            }
 
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0,
-               "The PLC refused both Forward Open services, so it does not support connected messaging.  "
-               "Set the use_connected_msg attribute to 0 for this device.");
+            /* an offer is still a ceiling: one below the protocol's minimum leaves nothing to try. */
+            ceiling = (uint16_t)(((offered > 0 && offered < fo->size) ? offered : fo->size) - 1);
+            step_down = true;
+            break;
+
+        case FO_NO_CONNECTIONS:
+            /* some firmware answers an oversized request so, and a full PLC may still take a small one. */
+            ceiling = (uint16_t)(fo->size - 1);
+            step_down = true;
+            break;
+
+        case FO_UNSUPPORTED:
+            if(fo->size > CIP_FO_PLAIN_MAX_SIZE) {
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "No Large Forward Open, trying the plain one.");
+                ceiling = CIP_FO_PLAIN_MAX_SIZE;
+                step_down = true;
+                break;
+            }
+
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0,
+                   "The PLC refused the plain Forward Open, so it does not support connected messaging.  "
+                   "Set the use_connected_msg attribute to 0 for this device.");
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            refused = true;
+            break;
+
+        case FO_ROUTE_REFUSED:
+            rc = decode_cip_error_code(status, status_size);
+            refused = true;
+            break;
+
+        case FO_LINK_OFFLINE: /* the route is right and the PLC is down: the normal backoff. */
+        case FO_OTHER: rc = decode_cip_error_code(status, status_size); break;
     }
+
+    if(step_down) {
+        uint16_t size = fo_next_size_down(session, ceiling);
+
+        if(size > 0) {
+            fo->size = size;
+            fo->state = FO_BUILD;
+        } else {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "No connection size left to try at or below %u bytes that clears the %d bytes this protocol needs!",
+                   (unsigned int)ceiling, MIN_PAYLOAD_SIZE(session));
+            rc = PLCTAG_ERR_TOO_SMALL;
+        }
+    }
+
+    /* ask again at once. */
+    if(fo->state == FO_BUILD) { return fo_step(session, sm); }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Open failed, %s.", plc_tag_decode_error(rc));
+
+    fo->state = FO_START;
     atomic_set_int32(&session->connection_status_reason, rc);
 
-    /*
-     * A wrong route or no connected messaging is the PLC's answer for the tags waiting on this
-     * connection, and asking again soon will not change it: stop hammering it and reconnect at the
-     * slowest rate.  Still not permanent -- a route can come back and an empty slot be filled.
-     */
-    if(forward_open_error_is_configuration(session, rc)) {
+    if(refused) {
         critical_block(&session->session_mutex) { session->refused_rc = rc; }
         backoff_saturate(&sm->retry_backoff);
         fail_queued_requests(session);
     }
 
-    return SESSION_UNREGISTER;
+    return rc;
 }
 
 
@@ -1437,7 +1537,7 @@ static void generic_step(cip_conn_p session, session_sm_t *sm) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
 
             /* every connect gets the full set of Forward Open retries. */
-            forward_open_reset_negotiation(session);
+            sm->fo.state = FO_START;
             session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
             /* we must connect to the gateway*/
@@ -1528,7 +1628,7 @@ static void generic_step(cip_conn_p session, session_sm_t *sm) {
                 if(plc_type == AB_PLC_NONE) {
                     sm->state = SESSION_IDENTIFY;
                 } else if(session->use_connected_msg) {
-                    sm->state = SESSION_SEND_FORWARD_OPEN;
+                    sm->state = SESSION_FORWARD_OPEN;
                 } else {
                     sm->state = SESSION_IDLE;
                 }
@@ -1547,42 +1647,25 @@ static void generic_step(cip_conn_p session, session_sm_t *sm) {
             } else if(session_refused(session)) {
                 sm->state = SESSION_UNREGISTER;
             } else if(session->use_connected_msg) {
-                sm->state = SESSION_SEND_FORWARD_OPEN;
+                sm->state = SESSION_FORWARD_OPEN;
             } else {
                 sm->state = SESSION_IDLE;
             }
             socket_wake(session->sock);
             break;
 
-        case SESSION_SEND_FORWARD_OPEN:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_SEND_FORWARD_OPEN state.");
+        case SESSION_FORWARD_OPEN:
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_FORWARD_OPEN state.");
             session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
-            if((rc = send_forward_open_request(session)) != PLCTAG_STATUS_OK) {
-                atomic_set_int32(&session->connection_status_reason, rc);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
+            if((rc = fo_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
+
+            if(rc == PLCTAG_STATUS_OK) {
+                sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
+                sm->state = SESSION_IDLE;
+            } else {
+                /* unregister anyway, then close the socket. */
                 sm->state = SESSION_UNREGISTER;
-            } else {
-                sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                       "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
-                sm->state = SESSION_RECEIVE_FORWARD_OPEN;
-            }
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_RECEIVE_FORWARD_OPEN:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_RECEIVE_FORWARD_OPEN state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
-
-            if((rc = receive_forward_open_response(session)) != PLCTAG_STATUS_OK) {
-                sm->state = forward_open_refused(session, sm, rc);
-            } else {
-                sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-                atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Send Forward Open succeeded, going to SESSION_IDLE state.");
-                sm->state = SESSION_IDLE;
             }
             socket_wake(session->sock);
             break;
@@ -1801,7 +1884,7 @@ static void logix_step(cip_conn_p session, session_sm_t *sm) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
 
             /* every connect gets the full set of Forward Open retries. */
-            forward_open_reset_negotiation(session);
+            sm->fo.state = FO_START;
             session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
             /* we must connect to the gateway*/
@@ -1877,40 +1960,23 @@ static void logix_step(cip_conn_p session, session_sm_t *sm) {
             sm->state = SESSION_CLOSE_SOCKET;
         } else {
             sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-            sm->state = (session->use_connected_msg ? SESSION_SEND_FORWARD_OPEN : SESSION_IDLE);
+            sm->state = (session->use_connected_msg ? SESSION_FORWARD_OPEN : SESSION_IDLE);
         }
         socket_wake(session->sock);
         break;
 
-            case SESSION_SEND_FORWARD_OPEN:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_SEND_FORWARD_OPEN state.");
+        case SESSION_FORWARD_OPEN:
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_FORWARD_OPEN state.");
             session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
-            if((rc = send_forward_open_request(session)) != PLCTAG_STATUS_OK) {
-                atomic_set_int32(&session->connection_status_reason, rc);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
-                sm->state = SESSION_UNREGISTER;
-            } else {
+            if((rc = fo_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
+
+            if(rc == PLCTAG_STATUS_OK) {
                 sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                       "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
-                sm->state = SESSION_RECEIVE_FORWARD_OPEN;
-            }
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_RECEIVE_FORWARD_OPEN:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_RECEIVE_FORWARD_OPEN state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
-
-            if((rc = receive_forward_open_response(session)) != PLCTAG_STATUS_OK) {
-                sm->state = forward_open_refused(session, sm, rc);
-            } else {
-                sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-                atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Send Forward Open succeeded, going to SESSION_IDLE state.");
                 sm->state = SESSION_IDLE;
+            } else {
+                /* unregister anyway, then close the socket. */
+                sm->state = SESSION_UNREGISTER;
             }
             socket_wake(session->sock);
             break;
@@ -2129,7 +2195,7 @@ static void pccc_step(cip_conn_p session, session_sm_t *sm) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
 
             /* every connect gets the full set of Forward Open retries. */
-            forward_open_reset_negotiation(session);
+            sm->fo.state = FO_START;
             session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
             /* we must connect to the gateway*/
@@ -2859,7 +2925,7 @@ int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, in
         int request_capacity = 0;
 
         critical_block(&session->session_mutex) {
-            request_capacity = (int)(GET_MAX_PAYLOAD_SIZE(session) + EIP_CIP_PREFIX_SIZE);
+            request_capacity = (int)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
         }
 
         /* make sure it will fit. */
@@ -3683,39 +3749,6 @@ int perform_forward_close(cip_conn_p session) {
 }
 
 
-int send_forward_open_request(cip_conn_p session) {
-    int rc = PLCTAG_STATUS_OK;
-    uint16_t max_payload;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting");
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Flag prohibiting use of extended ForwardOpen is %d.",
-           session->only_use_old_forward_open);
-
-    max_payload = (uint16_t)(session->only_use_old_forward_open ? session->fo_conn_size : session->fo_ex_conn_size);
-
-    /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
-    critical_block(&session->session_mutex) {
-        session->max_payload_guess =
-            ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload :
-                                                                                               session->max_payload_guess);
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Set Forward Open maximum payload size guess to %d bytes.",
-           session->max_payload_guess);
-
-    if(session->only_use_old_forward_open) {
-        rc = send_old_forward_open_request(session);
-    } else {
-        rc = send_extended_forward_open_request(session);
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done");
-
-    return rc;
-}
-
-
 /*
  * Advance the connection serial number, skipping zero.
  *
@@ -3734,10 +3767,19 @@ static uint16_t next_conn_serial_number(uint16_t current) {
 }
 
 
-int send_old_forward_open_request(cip_conn_p session) {
+/* build a Forward Open, Large or plain, for max_payload_guess bytes in session->data. */
+void encode_forward_open(cip_conn_p session, bool large) {
+    if(large) {
+        encode_large_forward_open(session);
+    } else {
+        encode_plain_forward_open(session);
+    }
+}
+
+
+void encode_plain_forward_open(cip_conn_p session) {
     eip_forward_open_request_t *fo = NULL;
     uint8_t *data;
-    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting");
 
@@ -3818,19 +3860,14 @@ int send_old_forward_open_request(cip_conn_p session) {
     /* set the size of the request */
     session->data_size = (uint32_t)(data - (session->data));
 
-    rc = send_eip_request(session, 0);
-
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done");
-
-    return rc;
 }
 
 
 /* new version of Forward Open */
-int send_extended_forward_open_request(cip_conn_p session) {
+void encode_large_forward_open(cip_conn_p session) {
     eip_forward_open_request_ex_t *fo = NULL;
     uint8_t *data;
-    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting");
 
@@ -3894,120 +3931,7 @@ int send_extended_forward_open_request(cip_conn_p session) {
     /* set the size of the request */
     session->data_size = (uint32_t)(data - (session->data));
 
-    rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
-
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done");
-
-    return rc;
-}
-
-
-int receive_forward_open_response(cip_conn_p session) {
-    eip_forward_open_response_t *fo_resp;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting");
-
-    /* Never wait unboundedly for the forward open response. A dropped session must surface as an */
-    /* error so the handler can log it and re-enter the connect/retry path instead of parking. */
-    rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to receive Forward Open response.");
-        return rc;
-    }
-
-    fo_resp = (eip_forward_open_response_t *)(session->data);
-
-    do {
-        /*
-         * recv_eip_response() only guarantees that we got an EIP header.  We are about to
-         * read the CIP reply status, so require everything up to and including status_size.
-         * An error reply legitimately stops there -- it carries extended status instead of
-         * the connection IDs -- so do not demand the whole struct here.  The buffer is not
-         * cleared between packets, so a short response would otherwise be read as stale
-         * data from the previous one.
-         */
-        if((size_t)session->data_size < offsetof(eip_forward_open_response_t, orig_to_targ_conn_id)) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                   "Forward Open response of %u bytes is too short to hold the CIP reply status at %d bytes!", session->data_size,
-                   (int)offsetof(eip_forward_open_response_t, orig_to_targ_conn_id));
-            rc = PLCTAG_ERR_TOO_SMALL;
-            break;
-        }
-
-        if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        if(fo_resp->general_status != AB_EIP_OK) {
-            uint8_t *status = &fo_resp->general_status;
-            size_t status_size = cip_error_data_size(status, session->data + session->data_size);
-            uint16_t extended_status = 0;
-            uint16_t offered_size = 0;
-
-            /* general status, the count of status words, then the words: extended status, and an offered size. */
-            if(status_size >= 4 && status[1] >= 1) { extended_status = (uint16_t)(status[2] | (status[3] << 8)); }
-            if(status_size >= 6 && status[1] >= 2) { offered_size = (uint16_t)(status[4] | (status[5] << 8)); }
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Open failed: %s (0x%02x/0x%04x) -- %s",
-                   decode_cip_error_short(status, status_size), fo_resp->general_status, extended_status,
-                   decode_cip_error_long(status, status_size));
-
-            rc = decode_cip_error_code(status, status_size);
-
-            /* the error code alone cannot tell a missing route from a link that is down. */
-            session->fo_ext_status = extended_status;
-
-            /*
-             * A size refusal may name a size the PLC does support.  It is recorded, not acted on:
-             * what to do with it is the negotiation's decision.
-             */
-            if(fo_resp->general_status == 0x01 && extended_status == CIP_EXT_ERR_INVALID_CONN_SIZE) {
-                rc = PLCTAG_ERR_TOO_LARGE;
-                session->fo_offered_size = offered_size;
-
-                if(offered_size > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "PLC reports that it supports a connection size of %u bytes.",
-                           (unsigned int)offered_size);
-                }
-            }
-
-            break;
-        }
-
-        /* a success reply must carry the connection IDs and the rest of the fixed fields. */
-        if((size_t)session->data_size < sizeof(*fo_resp)) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                   "Successful Forward Open response of %u bytes is too short to hold the connection data of %d bytes!",
-                   session->data_size, (int)sizeof(*fo_resp));
-            rc = PLCTAG_ERR_TOO_SMALL;
-            break;
-        }
-
-        /* success! */
-        session->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
-        session->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
-
-        critical_block(&session->session_mutex) { session->max_payload_size = session->max_payload_guess; }
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0,
-               "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
-               session->orig_connection_id, session->targ_connection_id, session->max_payload_size);
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return rc;
 }
 
 

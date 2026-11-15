@@ -107,8 +107,6 @@ struct cip_conn_t {
     /* connection variables. */
     bool use_connected_msg;
     bool only_use_old_forward_open;
-    int fo_conn_size;    /* old FO max connection size */
-    int fo_ex_conn_size; /* extended FO max connection size */
     uint16_t max_payload_guess;
     uint16_t max_payload_size;
 
@@ -129,11 +127,6 @@ struct cip_conn_t {
     /* the Forward Open path: the route, then the Message Router when connected. */
     uint8_t *conn_path;
     uint8_t conn_path_size;
-    /* Forward Open negotiation: the last refusal's extended status, the size it offered, and the
-     * duplicate connection IDs refused in a row.  Handler thread only. */
-    uint16_t fo_ext_status;
-    uint16_t fo_offered_size;
-    uint32_t fo_dup_retries;
 
     /* the longest wait between reconnects, from the connection_retry_max_delay_ms attribute. */
     atomic_int32_t connection_retry_max_delay_ms;

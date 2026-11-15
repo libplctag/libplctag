@@ -279,6 +279,8 @@ void usage(void) {
                     "                               0x0109, \"connection size not supported\", offering a smaller\n"
                     "                               size for the client to retry with.\n"
                     "        --supported_size=<n>   the size offered by --reject_size.  Defaults to 508.\n"
+                    "        --no_large_fo          refuse every Large Forward Open with 0x08, service not\n"
+                    "                               supported.\n"
                     "        --link_offline=<n>     fail the next <n> ForwardOpen requests with extended status\n"
                     "                               0x0800, \"network link offline\".\n"
                     "        --out_of_connections=<n> fail the next <n> ForwardOpen requests with extended\n"
@@ -378,6 +380,13 @@ static const args_flag_def_t arg_flags[] = {
      "empty_frag",
      "Answer the first <count> read requests with a partial-transfer status and no data",
      {.has_default = true, .value.int_val = 0}},
+    {"no_large_fo",
+     ARGS_TYPE_BOOL,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "no_large_fo",
+     "Refuse every Large Forward Open with 0x08",
+     {.has_default = false}},
     {"no_reply",
      ARGS_TYPE_INT,
      ARGS_OPTIONAL,
@@ -565,6 +574,8 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
         log_info("Setting out of connections count to %d.", (int)args_get_int(&args, "out_of_connections"));
         atomic_store_int32(plc->out_of_conn_count, (int32_t)args_get_int(&args, "out_of_connections"));
     }
+
+    plc->no_large_fo = args_get_bool(&args, "no_large_fo");
 
     log_info("Setting the size offered with a 0x0109 rejection to %d.", (int)args_get_int(&args, "supported_size"));
     plc->reject_size_supported = (uint16_t)args_get_int(&args, "supported_size");

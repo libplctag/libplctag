@@ -56,6 +56,19 @@ target_include_directories(test_platform_str PRIVATE
 
 target_link_libraries(test_platform_str PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_fo_classify: the Forward Open reply classifier, one reply per row of its table.
+add_executable(test_fo_classify test_fo_classify.c)
+
+target_include_directories(test_fo_classify PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_fo_classify PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+add_test(NAME unit_test_fo_classify COMMAND test_fo_classify)
+
 # test_tag_name_bounds: tests the CIP tag name encoder's bounds checks.
 # Tag creation encodes the name before any network I/O, so this needs no PLC.
 add_executable(test_tag_name_bounds test_tag_name_bounds.c)
@@ -264,7 +277,7 @@ add_test(NAME unit_test_debug_limit COMMAND test_debug_limit)
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
 # DISABLED until rolled-back code returns: DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_byte_buffer test_udt_size test_tag_schedule test_tag_registry test_debug_limit test_cip_status ${EXTRA_UNIT_TESTS}
-    DEPENDS test_platform_str test_tag_name_bounds test_byte_slice test_byte_buffer test_debug_limit ${EXTRA_UNIT_TESTS}
+    DEPENDS test_platform_str test_fo_classify test_tag_name_bounds test_byte_slice test_byte_buffer test_debug_limit ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

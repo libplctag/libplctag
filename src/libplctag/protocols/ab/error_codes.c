@@ -329,3 +329,42 @@ int decode_cip_error_code(uint8_t *data, size_t data_size) {
 
     return error_code_table[index].translated_code;
 }
+
+
+/*
+ * Classify a Forward Open reply from its raw status: general status, the count of status words,
+ * then the words.  *offered_size is the size a 0x0109 refusal offers, or 0.
+ */
+fo_reply_t classify_fo_reply(const uint8_t *status, size_t status_size, uint16_t *offered_size) {
+    uint16_t extended = 0;
+
+    *offered_size = 0;
+
+    if(status_size < 1) { return FO_OTHER; }
+
+    if(status_size >= 4 && status[1] >= 1) { extended = (uint16_t)(status[2] | (status[3] << 8)); }
+
+    switch(status[0]) {
+        case 0x00: return FO_ACCEPTED;
+        case 0x04: /* path segment error */
+        case 0x05: /* path destination unknown */
+            return FO_ROUTE_REFUSED;
+        case 0x08: return FO_UNSUPPORTED;
+        case 0x01: break;
+        default: return FO_OTHER;
+    }
+
+    switch(extended) {
+        case 0x0100: return FO_DUP_ID;
+        case 0x0109:
+            if(status_size >= 6 && status[1] >= 2) { *offered_size = (uint16_t)(status[4] | (status[5] << 8)); }
+            return FO_SIZE_REFUSED;
+        case 0x0113: return FO_NO_CONNECTIONS;
+        case 0x0800: return FO_LINK_OFFLINE;
+        case 0x0311: /* invalid port */
+        case 0x0312: /* invalid link address */
+        case 0x0315: /* invalid segment in the path */
+            return FO_ROUTE_REFUSED;
+        default: return FO_OTHER;
+    }
+}

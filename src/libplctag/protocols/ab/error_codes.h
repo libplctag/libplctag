@@ -40,6 +40,20 @@ extern const char *decode_cip_error_short(uint8_t *data, size_t data_size);
 extern const char *decode_cip_error_long(uint8_t *data, size_t data_size);
 extern int decode_cip_error_code(uint8_t *data, size_t data_size);
 
+/* what a Forward Open reply means for the next attempt.  The same for every PLC: CIP defines it. */
+typedef enum {
+    FO_ACCEPTED,
+    FO_DUP_ID,
+    FO_SIZE_REFUSED,
+    FO_NO_CONNECTIONS,
+    FO_LINK_OFFLINE,
+    FO_ROUTE_REFUSED,
+    FO_UNSUPPORTED,
+    FO_OTHER
+} fo_reply_t;
+
+extern fo_reply_t classify_fo_reply(const uint8_t *status, size_t status_size, uint16_t *offered_size);
+
 /*
  * Bytes remaining in a received buffer starting at data, given the buffer's end pointer.
  * data and buf_end must point into (or one past) the same buffer.  Returns 0 if data is at

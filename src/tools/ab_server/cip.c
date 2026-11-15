@@ -599,6 +599,12 @@ static byte_slice_t forward_open(cip_request_t *req, byte_slice_t out, plc_s *pl
     log_info("Processing %s request.", large ? "Large Forward Open" : "Forward Open");
     log_info_byte_slice(in);
 
+    /* a PLC without the Large Forward Open, as the Micro800 is. */
+    if(large && plc->no_large_fo) {
+        log_info("Refusing the Large Forward Open, as --no_large_fo asks.");
+        return cip_write_reply_header(out, req->service, CIP_ERR_UNSUPPORTED, false, 0);
+    }
+
     if(req->instance != 1) {
         log_info("Forward Open requested of Connection Manager instance %u!", req->instance);
         return cip_write_reply_header(out, req->service, CIP_ERR_UNSUPPORTED, false, 0);

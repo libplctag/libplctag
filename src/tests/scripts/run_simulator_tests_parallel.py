@@ -1022,6 +1022,23 @@ def build_manifest() -> Manifest:
                f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
                "--debug=2"], T, server=reject_size_server)
 
+    # A PLC without the Large Forward Open refuses it with 0x08: the client drops to the plain
+    # Forward Open at 504 bytes and connects.
+    no_large_fo_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--no_large_fo"],
+        startup_wait_s=1,
+    )
+    no_large_fo_test = sec.test("Large Forward Open refused with 0x08 falls back to the plain one",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=4"], T, server=no_large_fo_server)
+    sec.test("check the plain Forward Open was used",
+              None, T, depends_on=no_large_fo_test.id, ports_needed=0,
+              check=CheckSpec(log_file=no_large_fo_test.log_file,
+                               pattern=r"Forward Open for 504 bytes using the plain service", expected=1))
+
     tiny_size_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
