@@ -177,7 +177,6 @@ struct cip_conn_t {
     thread_p handler_thread;
     atomic_int32_t terminating;
     mutex_t session_mutex;
-    cond_p session_wait_cond;
 
     /* connection status - readable by tags via atomics */
     atomic_int32_t connection_status;        /* plc_tag_conn_status_t values */
