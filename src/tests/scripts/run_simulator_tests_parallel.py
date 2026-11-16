@@ -769,6 +769,21 @@ def build_manifest() -> Manifest:
     sec.test("check: the abort test's reads were packed", None, F, depends_on=abort_packed.id, ports_needed=0,
               check=CheckSpec(log_file=abort_packed.server_log_file, pattern=r"Multi-service request contains",
                               expected=1, at_least=True))
+    # A Logix connection packs every request that allows it, connected or not, even a lone one.
+    # allow_packing=0 is the escape: the request goes bare, so an application's own 0x0A sent
+    # through @raw is never nested in another.  Each case gets its own simulator so the server
+    # log holds only its requests.
+    for conn_name, conn_attr in (("connected", ""), ("unconnected", "&use_connected_msg=0")):
+        for pack_name, pack_attr, packed in (("packed", "", True), ("bare", "&allow_packing=0", False)):
+            t = sec.test(f"{conn_name} Logix requests go {pack_name}",
+                         [exe("tag_rw2"), "--type=sint32",
+                          f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=10"
+                          f"&name=TestBigArray{conn_attr}{pack_attr}",
+                          "--write=1,2,3,4,5,6,7,8,9,10"], F, server=cip_ops_server(0))
+            # the read before the write, the write, and the read after it.
+            sec.test(f"check: {conn_name} {pack_name} requests", None, F, depends_on=t.id, ports_needed=0,
+                     check=CheckSpec(log_file=t.server_log_file, pattern=r"Multi-service request contains",
+                                     expected=(2 if packed else 0), at_least=packed))
     sec.test("destroy tags while their reads are queued or on the wire",
               [exe("test_cip_ops"), "--mode=destroy-in-flight", "--count=10", cip_ops_base], F, server=cip_ops_server(50))
     sec.test("450 tags read at once, more than one packet holds",
@@ -1063,15 +1078,15 @@ def build_manifest() -> Manifest:
     # the specific warning rather than just the failure -- otherwise deleting a check would still
     # "pass" as long as something later rejected the tag.
     def corrupt_test(section, name, kind, gateway, tag_attrs, pattern, elem_type="sint32", plc_args=None,
-                     tag_def="TestDINTArray:DINT[10]"):
+                     tag_def="TestDINTArray:DINT[10]", count=100, expect_failure=True):
         server = ServerSpec(
             exe_path=exe("ab_server"),
             args_template=(plc_args or []) + ["--debug", "--port={PORT}", f"--tag={tag_def}",
-                                              f"--corrupt={kind}:100"],
+                                              f"--corrupt={kind}:{count}"],
             startup_wait_s=1,
         )
         t = section.test(name, [exe("tag_rw2"), f"--type={elem_type}", f"--tag={tag_attrs}", "--debug=4"],
-                         F, server=server, expect_failure=True)
+                         F, server=server, expect_failure=expect_failure)
         # at_least: the client retries, and each attempt logs the warning again.
         section.test(f"check: {name}", None, F, depends_on=t.id, ports_needed=0,
                      check=CheckSpec(log_file=t.log_file, pattern=pattern, expected=1, at_least=True))
@@ -1079,14 +1094,19 @@ def build_manifest() -> Manifest:
     ab_corrupt_tag = f"protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestDINTArray"
     ab_corrupt_args = ["--plc=ControlLogix", "--path=1,0"]
 
+    # Logix packs every request, so a bad frame is a bad packet: the requests go back on the queue,
+    # the connection is rebuilt, and the read succeeds once the corruption stops.
     corrupt_test(sec, "AB CPF item count", "cpf_count", egw, ab_corrupt_tag,
-                 r"Connected response has 3 CPF items, expected 2!", plc_args=ab_corrupt_args)
+                 r"Connected response has 3 CPF items, expected 2!", plc_args=ab_corrupt_args,
+                 count=3, expect_failure=False)
     corrupt_test(sec, "AB CPF item type", "cpf_type", egw, ab_corrupt_tag,
-                 r"Connected response CPF item types are 00ff/00b1, expected 00a1/00b1!", plc_args=ab_corrupt_args)
+                 r"Connected response CPF item types are 00ff/00b1, expected 00a1/00b1!", plc_args=ab_corrupt_args,
+                 count=3, expect_failure=False)
     corrupt_test(sec, "AB connection ID mismatch", "conn_id", egw, ab_corrupt_tag,
                  r"Connected response is for connection [0-9a-f]+ but ours is [0-9a-f]+!", plc_args=ab_corrupt_args)
     corrupt_test(sec, "AB CPF data item length mismatch", "item_len", egw, ab_corrupt_tag,
-                 r"Connected data item claims \d+ bytes but the response is \d+ bytes", plc_args=ab_corrupt_args)
+                 r"Connected data item claims \d+ bytes but the response is \d+ bytes", plc_args=ab_corrupt_args,
+                 count=3, expect_failure=False)
     # short_cpf lands on the ForwardOpen reply, which the client length-checks before the CIP
     # layer ever sees it; short_cip is connected-only, so it reaches the read response instead.
     corrupt_test(sec, "AB ForwardOpen reply too short", "short_cpf", egw, ab_corrupt_tag,
@@ -1250,6 +1270,22 @@ def build_manifest() -> Manifest:
     ogw = "127.0.0.1:{PORT}"
 
     sec = m.section("omron", server=omron_server)
+    # Omron packs too, connected or not; allow_packing=0 sends a request bare.  Each case gets its
+    # own simulator so the server log holds only its requests.
+    for conn_name, conn_attr in (("connected", ""), ("unconnected", "&use_connected_msg=0")):
+        for pack_name, pack_attr, packed in (("packed", "", True), ("bare", "&allow_packing=0", False)):
+            t = sec.test(f"{conn_name} Omron requests go {pack_name}",
+                         [exe("tag_rw2"), "--type=sint32",
+                          f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=10"
+                          f"&name=TestDINTArray{conn_attr}{pack_attr}",
+                          "--write=1,2,3,4,5,6,7,8,9,10"], F,
+                         server=ServerSpec(exe_path=exe("ab_server"),
+                                           args_template=["--debug", "--plc=Omron", "--port={PORT}",
+                                                          "--tag=TestDINTArray:DINT[10]"],
+                                           startup_wait_s=1))
+            sec.test(f"check: {conn_name} Omron {pack_name} requests", None, F, depends_on=t.id, ports_needed=0,
+                     check=CheckSpec(log_file=t.server_log_file, pattern=r"Multi-service request contains",
+                                     expected=(2 if packed else 0), at_least=packed))
     sec.test("identity, unrouted",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={ogw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("identity, Omron, connected",

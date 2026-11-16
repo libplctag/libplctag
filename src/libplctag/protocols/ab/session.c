@@ -130,6 +130,20 @@ typedef struct {
 } fo_neg_t;
 
 
+/*
+ * The requests in flight.  requests_single_step() sends one bare; requests_packed_step() sends
+ * one or more inside a Multiple Service Packet (0x0A).  requests_step() picks one per batch.
+ */
+typedef enum { REQ_START = 0, REQ_EXCHANGE } req_state_t;
+
+typedef struct {
+    req_state_t state;
+    bool packed;
+    int count;
+    ab_request_p reqs[MAX_REQUESTS];
+} req_batch_t;
+
+
 /* plc-specific session constructors */
 
 static cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host,
@@ -147,12 +161,12 @@ static int session_close_socket(cip_conn_p session);
 static int session_unregister(cip_conn_p session, exchange_t *ex);
 static THREAD_FUNC(session_handler);
 static int purge_aborted_requests_unsafe(cip_conn_p session);
-static int process_requests(cip_conn_p session);
 // static int check_packing(cip_conn_p session, ab_request_p request);
 static int get_payload_size(cip_conn_p session, ab_request_p request);
-static int frame_cip_request(cip_conn_p session, ab_request_p request);
+static size_t frame_header_size(cip_conn_p session, bool connected);
+static size_t frame_room(cip_conn_p session, bool connected);
+static int frame_cip_request(cip_conn_p session, bool connected, size_t cip_size);
 static int check_response_framing(cip_conn_p session, size_t *reply_offset);
-static int pack_requests(cip_conn_p session, ab_request_p *requests, int num_requests);
 static int prepare_request(cip_conn_p session);
 static int send_eip_request(cip_conn_p session, int timeout);
 static int recv_eip_response(cip_conn_p session, int timeout);
@@ -164,7 +178,7 @@ static int recv_finish(cip_conn_p session);
 static void exchange_start(cip_conn_p session, exchange_t *ex, bool want_reply);
 static ex_result_t exchange_step(cip_conn_p session, exchange_t *ex);
 static int exchange_wait_events(const exchange_t *ex);
-static int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, int num_packed);
+static int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, bool packed);
 // static int perform_forward_open(cip_conn_p session);
 static int perform_forward_close(cip_conn_p session);
 // static int try_forward_open_ex(cip_conn_p session, int *max_payload_size_guess);
@@ -353,7 +367,14 @@ int session_get_available_cip_payload_space(cip_conn_p session) {
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session payload calculation: max_payload_size=%d", max_payload_size);
 
-        // Account for CPF data item overhead
+        /* a type that packs sends every request in a Multiple Service Packet, even a lone one. */
+        {
+            const cip_plc_type_t *plc = ab_plc_type_get(session->plc_type);
+
+            if(plc && plc->allow_packing) { result -= (int)(sizeof(cip_multi_req_header) + sizeof(uint16_le)); }
+        }
+
+        /* Account for CPF data item overhead */
         if(session->use_connected_msg) {
             result -= (int)sizeof(cpf_connected_data_item);
         } else {
@@ -1137,9 +1158,6 @@ int session_add_request(cip_conn_p session, ab_request_p req) {
             return PLCTAG_ERR_NULL_PTR;
         }
 
-        /* only a connected packet carries a Multiple Service Packet here. */
-        if(!req->connected) { req->allow_packing = 0; }
-
         /* without the fragmented services an unbudgeted reply could overflow the packed reply. */
         {
             const cip_plc_type_t *plc = ab_plc_type_get(session->plc_type);
@@ -1192,9 +1210,12 @@ typedef struct session_sm_s {
     int auto_disconnect;
     exchange_t ex; /* the exchange in flight, if any */
     fo_neg_t fo;   /* the Forward Open negotiation */
+    req_batch_t batch; /* the requests in flight */
 } session_sm_t;
 
 static int fo_step(cip_conn_p session, session_sm_t *sm);
+static int requests_step(cip_conn_p session, session_sm_t *sm);
+static void requeue_batch(cip_conn_p session, req_batch_t *b);
 
 static void generic_step(cip_conn_p session, session_sm_t *sm);
 static void logix_step(cip_conn_p session, session_sm_t *sm);
@@ -1701,7 +1722,10 @@ static void generic_step(cip_conn_p session, session_sm_t *sm) {
                 }
             }
 
-            if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
+            /* a batch in flight: nothing else to decide until it is done. */
+            if((rc = requests_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
+
+            if(rc != PLCTAG_STATUS_OK) {
                 atomic_set_int32(&session->connection_status_reason, rc);
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while processing requests %s!",
                        plc_tag_decode_error(rc));
@@ -2012,7 +2036,10 @@ static void logix_step(cip_conn_p session, session_sm_t *sm) {
                 }
             }
 
-            if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
+            /* a batch in flight: nothing else to decide until it is done. */
+            if((rc = requests_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
+
+            if(rc != PLCTAG_STATUS_OK) {
                 atomic_set_int32(&session->connection_status_reason, rc);
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while processing requests %s!",
                        plc_tag_decode_error(rc));
@@ -2307,7 +2334,10 @@ static void pccc_step(cip_conn_p session, session_sm_t *sm) {
                 }
             }
 
-            if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
+            /* a batch in flight: nothing else to decide until it is done. */
+            if((rc = requests_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
+
+            if(rc != PLCTAG_STATUS_OK) {
                 atomic_set_int32(&session->connection_status_reason, rc);
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while processing requests %s!",
                        plc_tag_decode_error(rc));
@@ -2507,6 +2537,9 @@ THREAD_FUNC(session_handler) {
         }
     }
 
+    /* a batch in flight goes back on the queue, where the destructor releases it. */
+    requeue_batch(session, &sm.batch);
+
     /*
      * One last time before we exit.
      */
@@ -2564,282 +2597,331 @@ int purge_aborted_requests_unsafe(cip_conn_p session) {
 }
 
 
-int process_requests(cip_conn_p session) {
+/*
+ * The Multiple Service Packet reply as a whole: its status, then a count and offsets that are
+ * inside the packet.  Each request's own status is that request's business.
+ */
+static int check_packed_reply(cip_conn_p session, req_batch_t *b) {
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p request = NULL;
-    ab_request_p bundled_requests[MAX_REQUESTS] = {NULL};
-    int num_bundled_requests = 0;
-    int remaining_space = 0;
+    cip_multi_resp_header *multi_resp = NULL;
+    size_t reply_offset = 0;
 
+    if((rc = check_response_framing(session, &reply_offset)) != PLCTAG_STATUS_OK) { return rc; }
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Starting.");
+    multi_resp = (cip_multi_resp_header *)(session->data + reply_offset);
 
-    if(!session) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Null session pointer!");
-        return PLCTAG_ERR_NULL_PTR;
+    /* punt if we got an overall error or it is not a partial/bundled error. */
+    if(multi_resp->status != AB_EIP_OK && multi_resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
+        size_t status_size = cip_error_data_size(&multi_resp->status, session->data + session->data_size);
+
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received CIP error %s (%s).",
+               decode_cip_error_long(&multi_resp->status, status_size),
+               decode_cip_error_short(&multi_resp->status, status_size));
+        return decode_cip_error_code(&multi_resp->status, status_size);
     }
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Checking for requests to process.");
+    /*
+     * The count word and the offset array that follows it are both past the
+     * fixed part of the response we checked above, and the array is sized by a
+     * count the PLC controls.  A short response with a large count would have us
+     * reading offsets out of the buffer to decide whether the offsets are in the
+     * buffer, so bound the whole header before touching any of it.
+     */
+    {
+        size_t offsets_start =
+            (size_t)((uint8_t *)multi_resp - session->data) + offsetof(cip_multi_resp_header, request_offsets);
+        size_t offsets_size = (size_t)b->count * sizeof(uint16_le);
 
-    rc = PLCTAG_STATUS_OK;
-    request = NULL;
-    session->data_size = 0;
-    session->data_offset = 0;
-
-    /* grab a request off the front of the list. */
-    critical_block(&session->session_mutex) {
-        // FIXME - no logging in a mutex!
-        // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
-
-        /* is there anything to do? */
-        if(vector_length(session->requests)) {
-            /* get rid of all aborted requests. */
-            purge_aborted_requests_unsafe(session);
-
-            /* if there are still requests after purging all the aborted requests, process them. */
-
-            /*
-             * The total allowed space for requests is the negotiated packet capacity
-             * less the overhead of the CPF data item. The rest of the space is for
-             * the EIP encapsulation header and the CPF header and the CPF address item,
-             * which are already accounted for in the buffer structure.
-             */
-            remaining_space = session_get_available_cip_payload_space(session);
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Available payload space is %d bytes.", remaining_space);
-
-            /*
-             * The logic below is a bit convoluted.
-             *
-             * - If the first request takes up all the space, we cannot pack any more requests.
-             *
-             * - If the first request is packable, we can keep packing requests
-             *   until we run out of space or we reach the maximum number of requests.  We need to make sure
-             *   that the overhead of the CIP packed request header is accounted for in the remaining space as well as the
-             *   two-byte offset entry for each request.
-             *
-             * - If we are packing requests, and the next one is not packable, we stop packing.
-             *
-             * - If the first request is not packable, we can only pack it
-             *   if it is the first one in the queue. And then can pack no more
-             *   requests after that.
-             */
-
-            if(vector_length(session->requests)) {
-                /* Always process the first request, regardless of packability */
-                request = vector_get(session->requests, 0);
-                int first_request_size = get_payload_size(session, request);
-
-                /* the replies share one packet too, so they are budgeted the same way. */
-                int remaining_reply_space = remaining_space - request->reply_size;
-
-                /* Check if the first request fits at all */
-                if(first_request_size <= remaining_space) {
-                    bundled_requests[num_bundled_requests] = request;
-                    num_bundled_requests++;
-                    remaining_space -= first_request_size;
-                    vector_remove(session->requests, 0);
-
-                    /* If the first request is packable, try to pack more requests */
-                    if(request->allow_packing && vector_length(session->requests) > 0) {
-                        /* Account for CIP multi-request overhead now that we know we'll have multiple requests */
-                        remaining_space -= (int)sizeof(cip_multi_req_header);
-                        remaining_reply_space -= (int)sizeof(cip_multi_resp_header);
-
-                        /* Account for 2-byte offset entry per request (including the first one already processed) */
-                        int multi_request_overhead = 2;            /* 2-byte offset entry per additional request */
-                        remaining_space -= multi_request_overhead; /* for the first request */
-                        remaining_reply_space -= multi_request_overhead;
-
-                        while(vector_length(session->requests) > 0 && num_bundled_requests < MAX_REQUESTS) {
-
-                            request = vector_get(session->requests, 0);
-
-                            /* Only pack if this request is packable */
-                            if(!request->allow_packing) { break; }
-
-                            int next_request_size = get_payload_size(session, request) + multi_request_overhead;
-
-                            /* Check if this request fits in remaining space */
-                            if(next_request_size > remaining_space) { break; }
-
-                            /* a reply that has to come back whole has to fit too. */
-                            if(request->reply_size > 0 && request->reply_size + multi_request_overhead > remaining_reply_space) {
-                                break;
-                            }
-
-                            bundled_requests[num_bundled_requests] = request;
-                            num_bundled_requests++;
-                            remaining_space -= next_request_size;
-                            remaining_reply_space -= request->reply_size + multi_request_overhead;
-                            vector_remove(session->requests, 0);
-                        }
-                    }
-                    /* If first request is not packable, we stop here (only the first request is packed) */
-                } else {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                           "First request size %d exceeds remaining space %d, cannot process any requests.", first_request_size,
-                           remaining_space);
-                }
-            } else {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "All requests in queue were aborted, nothing to do.");
-            }
+        if(offsets_start > (size_t)session->data_size
+           || offsets_size > (size_t)session->data_size - offsets_start) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "Response of %d bytes is too short to hold %d packed response offsets!", session->data_size,
+                   b->count);
+            return PLCTAG_ERR_TOO_SMALL;
         }
     }
 
-    if(num_bundled_requests > 0) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "%d requests to process.", num_bundled_requests);
+    /* we have multiple requests, sanity check the data. */
+    if(le2h16(multi_resp->request_count) == b->count) {
+        size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - session->data);
 
-        do {
-            /* copy and pack the requests into the session buffer. */
-            /* FIXME - pack_requests() only returns PLCTAG_STATUS_OK */
-            rc = pack_requests(session, bundled_requests, num_bundled_requests);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while packing requests, %s!", plc_tag_decode_error(rc));
-                break;
-            }
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "offset_base=%zu", offset_base);
 
-            /* fill in all the necessary parts to the request. */
-            if((rc = prepare_request(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to prepare request, %s!", plc_tag_decode_error(rc));
-                break;
-            }
+        /* check all the offsets */
+        for(int resp_index = 0; resp_index < b->count; resp_index++) {
+            size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
 
-            /* send the request */
-            if((rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error sending packet %s!", plc_tag_decode_error(rc));
-                break;
-            }
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Response %d starts at byte offset %zu", resp_index,
+                   resp_offset);
 
-            /* wait for the response */
-            if((rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error receiving packet response %s!", plc_tag_decode_error(rc));
-                break;
-            }
-
-            /*
-             * check the CIP status, but only if this is a bundled
-             * response.   If it is a singleton, then we pass the
-             * status back to the tag.
-             */
-            if(num_bundled_requests > 1) {
-                cip_multi_resp_header *multi_resp = NULL;
-                size_t reply_offset = 0;
-
-                if((rc = check_response_framing(session, &reply_offset)) != PLCTAG_STATUS_OK) { break; }
-
-                multi_resp = (cip_multi_resp_header *)(session->data + reply_offset);
-
-                /* punt if we got an overall error or it is not a partial/bundled error. */
-                if(multi_resp->status != AB_EIP_OK && multi_resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
-                    size_t status_size = cip_error_data_size(&multi_resp->status, session->data + session->data_size);
-
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received CIP error %s (%s).",
-                           decode_cip_error_long(&multi_resp->status, status_size),
-                           decode_cip_error_short(&multi_resp->status, status_size));
-                    rc = decode_cip_error_code(&multi_resp->status, status_size);
-                    break;
-                }
-
-                /*
-                 * The count word and the offset array that follows it are both past the
-                 * fixed part of the response we checked above, and the array is sized by a
-                 * count the PLC controls.  A short response with a large count would have us
-                 * reading offsets out of the buffer to decide whether the offsets are in the
-                 * buffer, so bound the whole header before touching any of it.
-                 */
-                {
-                    size_t offsets_start =
-                        (size_t)((uint8_t *)multi_resp - session->data) + offsetof(cip_multi_resp_header, request_offsets);
-                    size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
-
-                    if(offsets_start > (size_t)session->data_size
-                       || offsets_size > (size_t)session->data_size - offsets_start) {
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                               "Response of %d bytes is too short to hold %d packed response offsets!", session->data_size,
-                               num_bundled_requests);
-                        rc = PLCTAG_ERR_TOO_SMALL;
-                        break;
-                    }
-                }
-
-                /* we have multiple requests, sanity check the data. */
-                if(le2h16(multi_resp->request_count) == num_bundled_requests) {
-                    size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - session->data);
-
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "offset_base=%zu", offset_base);
-
-                    /* check all the offsets */
-                    for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
-                        size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
-
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Response %d starts at byte offset %zu", resp_index,
-                               resp_offset);
-
-                        if(resp_offset >= (size_t)session->data_size) {
-                            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                                   "Response %d has offset %zu which is outside the session data!", resp_index, resp_offset);
-                            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-                            break;
-                        }
-                    }
-                } else {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Expected %d packed responses back but got %zu!",
-                           num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
-                    rc = PLCTAG_ERR_BAD_DATA;
-                    break;
-                }
-            }
-
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Got error %s when processing incoming response(s)!",
-                       plc_tag_decode_error(rc));
-                break;
-            }
-
-            /* copy the results back out. Every request gets a copy. */
-            for(int i = 0; i < num_bundled_requests; i++) {
-                rc = unpack_response(session, bundled_requests[i], i, num_bundled_requests);
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, bundled_requests[i]->tag_id, "Unable to unpack response!");
-                    break;
-                }
-
-                /* release our reference */
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, bundled_requests[i]->tag_id,
-                       "rc_dec: Releasing request reference.");
-                bundled_requests[i] = rc_dec(bundled_requests[i]);
-            }
-
-            rc = PLCTAG_STATUS_OK;
-        } while(0);
-
-        /* problem? push the requests back on the queue. */
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error sending or receiving requests!");
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Pushing %d requests back into the queue.", num_bundled_requests);
-
-            /* session->requests is also written by session_add_request() (tickler thread)
-             * under session->session_mutex, so this push-back needs the same lock. */
-            critical_block(&session->session_mutex) {
-                for(int i = num_bundled_requests - 1; i >= 0; i--) {
-                    if(bundled_requests[i]) { vector_insert(session->requests, 0, bundled_requests[i]); }
-                }
+            if(resp_offset >= (size_t)session->data_size) {
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                       "Response %d has offset %zu which is outside the session data!", resp_index, resp_offset);
+                return PLCTAG_ERR_OUT_OF_BOUNDS;
             }
         }
-
-        /* tickle the main tickler thread to note that we have responses. */
-        plc_tag_tickler_wake();
+    } else {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Expected %d packed responses back but got %zu!",
+               b->count, (size_t)le2h16(multi_resp->request_count));
+        return PLCTAG_ERR_BAD_DATA;
     }
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Done.");
-
-    return rc;
+    return PLCTAG_STATUS_OK;
 }
 
 
-int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, int num_packed) {
+/* put a batch back at the front of the queue, in order, after a failure. */
+static void requeue_batch(cip_conn_p session, req_batch_t *b) {
+    if(b->count > 0) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Pushing %d requests back into the queue.", b->count);
+    }
+
+    /* session->requests is also written by session_add_request() under the same mutex. */
+    critical_block(&session->session_mutex) {
+        for(int i = b->count - 1; i >= 0; i--) {
+            if(b->reqs[i]) { vector_insert(session->requests, 0, b->reqs[i]); }
+            b->reqs[i] = NULL;
+        }
+    }
+
+    b->count = 0;
+    b->state = REQ_START;
+}
+
+
+/*
+ * Take the next batch off the queue: one request, or for a packed batch as many as fit with the
+ * same framing.  The available space already allows for one Multiple Service Packet header on a
+ * type that packs.  Returns the number taken.
+ */
+static int take_batch(cip_conn_p session, req_batch_t *b) {
+    critical_block(&session->session_mutex) {
+        ab_request_p first = NULL;
+        int remaining_space = 0;
+        int remaining_reply_space = 0;
+        int first_size = 0;
+
+        purge_aborted_requests_unsafe(session);
+
+        if(!vector_length(session->requests)) { break; }
+
+        remaining_space = session_get_available_cip_payload_space(session);
+        first = vector_get(session->requests, 0);
+        first_size = get_payload_size(session, first);
+
+        if(first_size > remaining_space) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, first->tag_id,
+                   "First request size %d exceeds remaining space %d, cannot process any requests.", first_size,
+                   remaining_space);
+            break;
+        }
+
+        b->reqs[b->count++] = first;
+        vector_remove(session->requests, 0);
+
+        if(!b->packed) { break; }
+
+        /* the replies share one packet too, so they are budgeted the same way. */
+        remaining_reply_space = remaining_space - first->reply_size;
+        remaining_space -= first_size;
+
+        /* the pad before the route path depends on the whole packet's length. */
+        if(!first->connected && session->route_path_size > 0) { remaining_space--; }
+
+        while(vector_length(session->requests) > 0 && b->count < MAX_REQUESTS) {
+            ab_request_p next = vector_get(session->requests, 0);
+            int next_size = next->request_size + (int)sizeof(uint16_le);
+
+            /* a request that must go bare, or with other framing, starts the next batch. */
+            if(!next->allow_packing || next->connected != first->connected) { break; }
+
+            if(next->request_size <= 0 || next_size > remaining_space) { break; }
+
+            /* a reply that has to come back whole has to fit too. */
+            if(next->reply_size > 0 && next->reply_size + (int)sizeof(uint16_le) > remaining_reply_space) { break; }
+
+            b->reqs[b->count++] = next;
+            remaining_space -= next_size;
+            remaining_reply_space -= next->reply_size + (int)sizeof(uint16_le);
+            vector_remove(session->requests, 0);
+        }
+    }
+
+    return b->count;
+}
+
+
+/* build the batch into the session buffer, framed and ready, and start the exchange. */
+static int start_batch(cip_conn_p session, session_sm_t *sm) {
+    req_batch_t *b = &sm->batch;
+    bool connected = (b->reqs[0]->connected != 0);
+    uint8_t *cip = session->data + frame_header_size(session, connected);
+    size_t room = frame_room(session, connected);
+    size_t cip_size = 0;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "%d request(s) to send%s.", b->count, (b->packed ? ", packed" : ""));
+
+    if(!b->packed) {
+        ab_request_p req = b->reqs[0];
+
+        if(req->request_size < 0 || (size_t)req->request_size > room) { return PLCTAG_ERR_TOO_LARGE; }
+
+        mem_copy(cip, req->data, req->request_size);
+        cip_size = (size_t)req->request_size;
+    } else {
+        cip_multi_req_header *msp = (cip_multi_req_header *)cip;
+        size_t offset = sizeof(uint16_le) * (size_t)(b->count + 1); /* from the count word */
+
+        cip_size = sizeof(cip_multi_req_header) + sizeof(uint16_le) * (size_t)b->count;
+
+        if(cip_size > room) { return PLCTAG_ERR_TOO_LARGE; }
+
+        msp->service_code = AB_EIP_CMD_CIP_MULTI;
+        msp->req_path_size = 0x02; /* words */
+        msp->req_path[0] = 0x20;   /* class */
+        msp->req_path[1] = 0x02;   /* Message Router */
+        msp->req_path[2] = 0x24;   /* instance */
+        msp->req_path[3] = 0x01;   /* #1 */
+        msp->request_count = h2le16((uint16_t)b->count);
+
+        for(int i = 0; i < b->count; i++) {
+            ab_request_p req = b->reqs[i];
+
+            if(req->request_size < 0 || (size_t)req->request_size > room - cip_size) {
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, req->tag_id, "Packed requests do not fit the session buffer!");
+                return PLCTAG_ERR_TOO_LARGE;
+            }
+
+            msp->request_offsets[i] = h2le16((uint16_t)offset);
+            mem_copy(cip + cip_size, req->data, req->request_size);
+            cip_size += (size_t)req->request_size;
+            offset += (size_t)req->request_size;
+        }
+    }
+
+    if((rc = frame_cip_request(session, connected, cip_size)) != PLCTAG_STATUS_OK) { return rc; }
+
+    if((rc = prepare_request(session)) != PLCTAG_STATUS_OK) { return rc; }
+
+    exchange_start(session, &sm->ex, true);
+    b->state = REQ_EXCHANGE;
+
+    return PLCTAG_STATUS_PENDING;
+}
+
+
+/* hand each request its reply.  One that cannot take it goes back on the queue with the rest. */
+static int deliver_batch(cip_conn_p session, req_batch_t *b) {
+    int rc = PLCTAG_STATUS_OK;
+
+    for(int i = 0; i < b->count; i++) {
+        if((rc = unpack_response(session, b->reqs[i], i, b->packed)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, b->reqs[i]->tag_id, "Unable to unpack response!");
+            break;
+        }
+
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, b->reqs[i]->tag_id, "rc_dec: Releasing request reference.");
+        b->reqs[i] = rc_dec(b->reqs[i]);
+    }
+
+    /* tickle the main tickler thread to note that we have responses. */
+    plc_tag_tickler_wake();
+
+    if(rc != PLCTAG_STATUS_OK) {
+        requeue_batch(session, b);
+        return rc;
+    }
+
+    b->count = 0;
+    b->state = REQ_START;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * One request, bare.  REQ_START takes it and sends it; REQ_EXCHANGE waits for the reply and
+ * hands it over.  PLCTAG_STATUS_PENDING while one is in flight.
+ */
+static int requests_single_step(cip_conn_p session, session_sm_t *sm) {
+    req_batch_t *b = &sm->batch;
+    int rc = PLCTAG_STATUS_OK;
+
+    if(b->state == REQ_START) {
+        if(!take_batch(session, b)) { return PLCTAG_STATUS_OK; }
+
+        if((rc = start_batch(session, sm)) != PLCTAG_STATUS_PENDING) { requeue_batch(session, b); }
+
+        return rc;
+    }
+
+    switch(exchange_step(session, &sm->ex)) {
+        case EX_PENDING: return PLCTAG_STATUS_PENDING;
+        case EX_FAILED: requeue_batch(session, b); return sm->ex.rc;
+        case EX_DONE: break;
+    }
+
+    return deliver_batch(session, b);
+}
+
+
+/*
+ * Requests inside a Multiple Service Packet, one or more.  REQ_START fills and sends it;
+ * REQ_EXCHANGE waits for the reply, checks the packet as a whole, and hands each request its
+ * reply.  A bad packet sends the batch back to the queue and drops the connection.
+ */
+static int requests_packed_step(cip_conn_p session, session_sm_t *sm) {
+    req_batch_t *b = &sm->batch;
+    int rc = PLCTAG_STATUS_OK;
+
+    if(b->state == REQ_START) {
+        if(!take_batch(session, b)) { return PLCTAG_STATUS_OK; }
+
+        if((rc = start_batch(session, sm)) != PLCTAG_STATUS_PENDING) { requeue_batch(session, b); }
+
+        return rc;
+    }
+
+    switch(exchange_step(session, &sm->ex)) {
+        case EX_PENDING: return PLCTAG_STATUS_PENDING;
+        case EX_FAILED: requeue_batch(session, b); return sm->ex.rc;
+        case EX_DONE: break;
+    }
+
+    if((rc = check_packed_reply(session, b)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Bad packed reply, %s!", plc_tag_decode_error(rc));
+        requeue_batch(session, b);
+        return rc;
+    }
+
+    return deliver_batch(session, b);
+}
+
+
+/*
+ * The requests phase, run from IDLE.  A type with the Multiple Service Packet service packs every
+ * request that allows it, even a lone one; anything else goes bare.
+ */
+static int requests_step(cip_conn_p session, session_sm_t *sm) {
+    if(sm->batch.state == REQ_START) {
+        const cip_plc_type_t *plc = ab_plc_type_get(session->plc_type);
+        bool front_packs = false;
+
+        critical_block(&session->session_mutex) {
+            ab_request_p front = vector_length(session->requests) ? vector_get(session->requests, 0) : NULL;
+
+            front_packs = (front && front->allow_packing);
+        }
+
+        sm->batch.packed = (plc && plc->allow_packing && front_packs);
+    }
+
+    return sm->batch.packed ? requests_packed_step(session, sm) : requests_single_step(session, sm);
+}
+
+
+int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, bool packed) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t *buf_end = session->data + session->data_size;
     size_t reply_offset = 0;
@@ -2871,7 +2953,7 @@ int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, in
 
     reply = session->data + reply_offset;
 
-    if(num_packed <= 1) {
+    if(!packed) {
         pkt_start = reply;
         pkt_end = buf_end;
     } else {
@@ -3066,45 +3148,54 @@ int check_response_framing(cip_conn_p session, size_t *reply_offset) {
 
 
 /*
- * Write the EIP and CPF framing for a CIP-only request into the session buffer, then its CIP
- * bytes.  prepare_request() fills in the session handle, sequence numbers and connection ID.
+ * Write the EIP and CPF framing around a CIP message already in the session buffer at
+ * frame_header_size().  prepare_request() fills in the session handle, sequence numbers and
+ * connection ID.
  *
  *   connected                  EIP, CPF connected address and data items, CIP
  *   unconnected, with a path   EIP, CPF null address and data items, Unconnected Send wrapping
  *                              the CIP, then the route path
  *   unconnected, no path       EIP, CPF null address and data items, CIP to the device itself
  */
-int frame_cip_request(cip_conn_p session, ab_request_p request) {
-    size_t header_size = 0;
+/* where the CIP message starts in the session buffer, after the framing in front of it. */
+static size_t frame_header_size(cip_conn_p session, bool connected) {
+    if(connected) { return sizeof(eip_cip_co_req); }
+
+    return (session->route_path_size > 0) ? sizeof(eip_cip_uc_req) : sizeof(eip_cpf_uc_header);
+}
+
+
+/* how many CIP bytes fit in the session buffer, leaving room for the framing on both sides. */
+static size_t frame_room(cip_conn_p session, bool connected) {
+    size_t used = frame_header_size(session, connected);
+
+    /* the route path behind an Unconnected Send, its size word, and a pad byte. */
+    if(!connected && session->route_path_size > 0) { used += (size_t)session->route_path_size + 3; }
+
+    return (used < (size_t)session->data_capacity) ? (size_t)session->data_capacity - used : 0;
+}
+
+
+int frame_cip_request(cip_conn_p session, bool connected, size_t cip_size) {
+    size_t header_size = frame_header_size(session, connected);
     size_t total_size = 0;
-    uint8_t *cip = NULL;
-    bool wrapped = (!request->connected && session->route_path_size > 0);
+    uint8_t *cip = session->data + header_size;
+    bool wrapped = (!connected && session->route_path_size > 0);
     /* an odd-length embedded request is padded to a word before the route path; the length does not count it. */
-    size_t pad_size = ((wrapped && (request->request_size & 1)) ? 1 : 0);
+    size_t pad_size = ((wrapped && (cip_size & 1)) ? 1 : 0);
     size_t path_size = (wrapped ? (size_t)session->route_path_size + 2 + pad_size : 0);
 
-    if(request->connected) {
-        header_size = sizeof(eip_cip_co_req);
-    } else if(wrapped) {
-        header_size = sizeof(eip_cip_uc_req);
-    } else {
-        header_size = sizeof(eip_cpf_uc_header);
-    }
+    total_size = header_size + cip_size + path_size;
 
-    total_size = header_size + (size_t)request->request_size + path_size;
-
-    if(request->request_size < 0 || total_size > (size_t)session->data_capacity) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, request->tag_id,
-               "Request of %d bytes does not fit the session buffer of %u bytes!", request->request_size,
-               session->data_capacity);
+    if(cip_size > frame_room(session, connected)) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Request of %zu bytes does not fit the session buffer of %u bytes!",
+               cip_size, session->data_capacity);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     mem_set(session->data, 0, (int)header_size);
-    cip = session->data + header_size;
-    mem_copy(cip, request->data, request->request_size);
 
-    if(request->connected) {
+    if(connected) {
         eip_cip_co_req *co = (eip_cip_co_req *)(session->data);
 
         co->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
@@ -3113,7 +3204,7 @@ int frame_cip_request(cip_conn_p session, ab_request_p request) {
         co->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
         co->cpf_cai_item_length = h2le16(4);
         co->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
-        co->cpf_cdi_item_length = h2le16((uint16_t)(request->request_size + (int)sizeof(uint16_le)));
+        co->cpf_cdi_item_length = h2le16((uint16_t)(cip_size + sizeof(uint16_le)));
     } else {
         eip_cpf_uc_header *uc = (eip_cpf_uc_header *)(session->data);
 
@@ -3127,7 +3218,7 @@ int frame_cip_request(cip_conn_p session, ab_request_p request) {
 
         if(wrapped) {
             eip_cip_uc_req *wrap = (eip_cip_uc_req *)(session->data);
-            uint8_t *path = cip + request->request_size + pad_size;
+            uint8_t *path = cip + cip_size + pad_size;
 
             wrap->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND;
             wrap->cm_req_path_size = 2;
@@ -3137,9 +3228,9 @@ int frame_cip_request(cip_conn_p session, ab_request_p request) {
             wrap->cm_req_path[3] = 0x01; /* instance 1 */
             wrap->secs_per_tick = AB_EIP_SECS_PER_TICK;
             wrap->timeout_ticks = AB_EIP_TIMEOUT_TICKS;
-            wrap->uc_cmd_length = h2le16((uint16_t)request->request_size);
+            wrap->uc_cmd_length = h2le16((uint16_t)cip_size);
 
-            if(pad_size) { cip[request->request_size] = 0; }
+            if(pad_size) { cip[cip_size] = 0; }
 
             /* route path: size in words, a reserved byte, then the path. */
             path[0] = (uint8_t)(session->route_path_size / 2);
@@ -3166,170 +3257,6 @@ int get_payload_size(cip_conn_p session, ab_request_p request) {
     wrapped = (!request->connected && session->route_path_size > 0);
 
     return request->request_size + (wrapped ? CIP_UC_SEND_WRAPPER_SIZE + (request->request_size & 1) : 0);
-}
-
-
-int pack_requests(cip_conn_p session, ab_request_p *requests, int num_requests) {
-    eip_cip_co_req *packed_req = NULL;
-    /* FIXME - is this the right way to check? */
-    int header_size = 0;
-    cip_multi_req_header *multi_header = NULL;
-    int current_offset = 0;
-    uint8_t *pkt_start = NULL;
-    int pkt_len = 0;
-    size_t pkt_offset = 0;
-    size_t src_offset = 0;
-    uint8_t *first_pkt_data = NULL;
-    uint8_t *next_pkt_data = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, requests[0]->tag_id, "Starting.");
-
-    if((uint32_t)requests[0]->request_size > session->data_capacity) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, requests[0]->tag_id,
-               "Request of %d bytes exceeds the session buffer capacity of %u bytes!", requests[0]->request_size,
-               session->data_capacity);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    /* frame the first request; the rest are packed in behind it. */
-    {
-        int rc = frame_cip_request(session, requests[0]);
-
-        if(rc != PLCTAG_STATUS_OK) { return rc; }
-    }
-
-    /* special case the case where there is just one request. */
-    if(num_requests == 1) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, requests[0]->tag_id, "Only one request, so done.");
-
-        return PLCTAG_STATUS_OK;
-    }
-
-    /* set up multi-packet header. */
-
-    header_size =
-        (int)(sizeof(cip_multi_req_header) + (sizeof(uint16_le) * (size_t)num_requests)); /* offsets for each request. */
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, requests[0]->tag_id, "header size %d", header_size);
-
-    packed_req = (eip_cip_co_req *)(session->data);
-
-    /* make room in the request packet in the session for the header. */
-    pkt_offset = (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - session->data) + sizeof(packed_req->cpf_conn_seq_num);
-    pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, requests[0]->tag_id, "packet 0 is of length %d.", pkt_len);
-
-    /*
-     * Bounds check before shifting data forward to make room for the multi-request header.
-     *
-     * Do this in offsets rather than pointers.  Forming first_pkt_data + pkt_len is itself
-     * undefined when the result would land outside the buffer, so a pointer comparison cannot
-     * be what decides whether it does -- the compiler may assume the addition stayed in bounds
-     * and fold the test away.  Each subtraction below is guarded by the term before it so none
-     * of them can wrap.
-     *
-     * pkt_len is signed and comes from a length field, so reject a negative one here too: it
-     * would move the destination backwards and hand mem_move() a negative size.
-     */
-    if(pkt_len < 0 || header_size < 0 || pkt_offset > (size_t)session->data_capacity
-       || (size_t)header_size > (size_t)session->data_capacity - pkt_offset
-       || (size_t)pkt_len > (size_t)session->data_capacity - pkt_offset - (size_t)header_size) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, requests[0]->tag_id,
-               "Bundled request header does not fit in the session buffer of %u bytes!", session->data_capacity);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    pkt_start = session->data + pkt_offset;
-
-    /* point to where we want the current packet to start. */
-    first_pkt_data = pkt_start + header_size;
-
-    /* move the data over to make room */
-    mem_move(first_pkt_data, pkt_start, pkt_len);
-
-    /* now fill in the header. Use pkt_start as it is pointing to the right location. */
-    multi_header = (cip_multi_req_header *)pkt_start;
-    multi_header->service_code = AB_EIP_CMD_CIP_MULTI;
-    multi_header->req_path_size = 0x02; /* length of path in words */
-    multi_header->req_path[0] = 0x20;   /* Class */
-    multi_header->req_path[1] = 0x02;   /* CM */
-    multi_header->req_path[2] = 0x24;   /* Instance */
-    multi_header->req_path[3] = 0x01;   /* #1 */
-    multi_header->request_count = h2le16((uint16_t)num_requests);
-
-    /* set up the offset for the first request. */
-    current_offset = (int)(sizeof(uint16_le) + (sizeof(uint16_le) * (size_t)num_requests));
-    multi_header->request_offsets[0] = h2le16((uint16_t)current_offset);
-
-    next_pkt_data = first_pkt_data + pkt_len;
-    current_offset = current_offset + pkt_len;
-
-    /* now process the rest of the requests. */
-    for(int i = 1; i < num_requests; i++) {
-
-        /* set up the offset */
-        multi_header->request_offsets[i] = h2le16((uint16_t)current_offset);
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "new_req=%p", requests[i]);
-
-        /* calculate the request start and length */
-        pkt_start = requests[i]->data;
-        pkt_len = requests[i]->request_size;
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "packet %d is of length %d.", i,
-               pkt_len);
-
-        /* as above: bound in offsets, and reject a negative length. */
-        if(pkt_len < 0) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
-                   "Bundled request %d has a negative payload length of %d!", i, pkt_len);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
-
-        /*
-         * pkt_len has to fit the SOURCE as well.  It comes from a length field in the request
-         * buffer, so bounding it only against the destination leaves mem_copy() free to read
-         * past the end of requests[i]->data.
-         */
-        src_offset = (size_t)(pkt_start - requests[i]->data);
-
-        if(requests[i]->request_size < 0 || src_offset > (size_t)requests[i]->request_size
-           || (size_t)pkt_len > (size_t)requests[i]->request_size - src_offset) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
-                   "Bundled request %d claims %d payload bytes but its buffer only holds %d!", i, pkt_len,
-                   requests[i]->request_size);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
-
-        pkt_offset = (size_t)(next_pkt_data - session->data);
-
-        if(pkt_offset > (size_t)session->data_capacity || (size_t)pkt_len > (size_t)session->data_capacity - pkt_offset) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
-                   "Bundled requests do not fit in the session buffer of %u bytes!", session->data_capacity);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
-
-        /* copy the request into the session buffer. */
-        mem_copy(next_pkt_data, pkt_start, pkt_len);
-
-        /* calculate the next packet info. */
-        next_pkt_data += pkt_len;
-        current_offset += pkt_len;
-    }
-
-    /* stitch up the CPF packet length */
-    packed_req->cpf_cdi_item_length = h2le16((uint16_t)(next_pkt_data - (uint8_t *)(&packed_req->cpf_conn_seq_num)));
-
-    /* stick up the EIP packet length */
-    packed_req->encap_length = h2le16((uint16_t)((size_t)(next_pkt_data - session->data) - sizeof(eip_encap)));
-
-    /* set the total data size */
-    session->data_size = (uint32_t)(next_pkt_data - session->data);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, requests[0]->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
 }
 
 
@@ -4077,7 +4004,6 @@ plc_type_t session_plc_type(cip_conn_p session, int32_t *refused_rc) {
  */
 int session_identify(cip_conn_p session) {
     static uint8_t get_identity[] = {0x01, 0x02, 0x20, 0x01, 0x24, 0x01}; /* Get_Attributes_All, Identity, 1 */
-    struct ab_request_t req;
     uint8_t *reply = NULL;
     size_t reply_offset = 0;
     uint8_t *data_end = NULL;
@@ -4091,12 +4017,9 @@ int session_identify(cip_conn_p session) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
-    mem_set(&req, 0, (int)sizeof(req));
-    req.data = get_identity;
-    req.request_size = (int)sizeof(get_identity);
-    req.connected = false;
+    mem_copy(session->data + frame_header_size(session, false), get_identity, (int)sizeof(get_identity));
 
-    rc = frame_cip_request(session, &req);
+    rc = frame_cip_request(session, false, sizeof(get_identity));
     if(rc == PLCTAG_STATUS_OK) { rc = prepare_request(session); }
     if(rc == PLCTAG_STATUS_OK) {
         session->data_offset = 0;

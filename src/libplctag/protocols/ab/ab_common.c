@@ -215,7 +215,7 @@ static const cip_plc_type_t plc_types[] = {
      .tag_create = cip_plc_tag_create},
     /* Omron packs only requests whose reply size is known; see ab_request_t's reply_size. */
     {.id = AB_PLC_OMRON_NJNX, .name = "Omron NJ/NX", .aliases = omron_aliases, .max_msg_size = MAX_CIP_OMRON_MSG_SIZE_EX,
-     .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .connected = 1, .allow_packing = true,
+     .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .connected = -1, .allow_packing = true,
      .needs_path = true, .setup_conn = session_setup_generic, .tag_create = cip_plc_tag_create},
     {.id = AB_PLC_GENERIC, .name = "generic CIP", .aliases = generic_aliases, .max_msg_size = MAX_CIP_LGX_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_LGX_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .fragmented = true,
