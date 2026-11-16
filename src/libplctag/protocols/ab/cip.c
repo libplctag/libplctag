@@ -55,7 +55,8 @@ static int match_numeric_segment(const char *path, size_t *path_index, uint8_t *
 static int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *conn_path_index);
 static int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, uint8_t *src_node, uint8_t *dest_node);
 
-// #define MAX_IP_ADDR_SEG_LEN (16)
+/* 255 less a pad byte and the 6-byte DH+ suffix. */
+#define MAX_ROUTE_BYTES (248)
 
 
 int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size,
@@ -110,6 +111,17 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
     if(conn_path_index >= max_conn_path_size) {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, 0, "Encoded connection path is too long (%d >= %d).",
                (int)(ssize_t)conn_path_index, max_conn_path_size);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    /*
+     * The encoded size is 8 bits (conn_path_size, route_path_size).  Leave room for a pad byte
+     * and the 6-byte DH+ suffix, which also covers the 4-byte Message Router added here or
+     * after identify.
+     */
+    if(conn_path_index > MAX_ROUTE_BYTES) {
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, 0, "Encoded route of %d bytes is over the maximum of %d bytes!",
+               (int)(ssize_t)conn_path_index, MAX_ROUTE_BYTES);
         return PLCTAG_ERR_TOO_LARGE;
     }
 

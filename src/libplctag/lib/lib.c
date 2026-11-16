@@ -1389,6 +1389,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      */
     attr_destroy(attribs);
 
+    /*
+     * The reference the tag was made with goes to the lookup table when it is published.  Take
+     * the creator's own first: a racing plc_tag_shutdown() can take the tag out and drop the
+     * table's reference while this function still uses the tag.
+     */
+    rc_inc(tag);
+
     /* map the tag to a tag ID */
     id = add_tag_lookup(tag, (reuse == 1 ? attrib_str : NULL), &existing);
 
@@ -1397,11 +1404,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to map tag %p to lookup table entry, rc=%s", tag,
                plc_tag_decode_error(id));
         rc_dec(tag);
+        rc_dec(tag);
         return id;
     }
 
     /* another create entered the same string first; this tag was never published. */
     if(existing) {
+        rc_dec(tag);
         rc_dec(tag);
         return reuse_existing(existing, timeout);
     }
@@ -1509,6 +1518,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     plc_tag_generic_handle_event_callbacks(tag);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Done.");
+
+    /* the creator's own reference; the lookup table keeps its own. */
+    rc_dec(tag);
 
     return id;
 }
@@ -5588,6 +5600,8 @@ plc_tag_p remove_tag_unsafe(lib_instance_p inst, int64_t tag_id) {
 
 /* A synchronous create failed: stop the tag, unpublish it and drop the create's reference. */
 int32_t create_failed(plc_tag_p tag, int32_t rc) {
+    plc_tag_p removed = NULL;
+
     critical_block(&tag->api_mutex) {
         /* a create waiting in reuse_existing() reads this. */
         tag->create_done = true;
@@ -5595,7 +5609,22 @@ int32_t create_failed(plc_tag_p tag, int32_t rc) {
 
         /* the vtable abort() expects the caller to hold api_mutex, and takes plc->mutex itself. */
         if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+    }
 
+    critical_block(&tag->instance->tag_lookup_mutex) { removed = remove_tag_unsafe(tag->instance, (int64_t)tag->tag_id); }
+
+    /*
+     * Shutdown already took the tag out, dropped the table's reference and raises DESTROYED for
+     * this id, so hand the id back: every event the caller sees is for an id it holds.
+     */
+    if(!removed) {
+        int32_t id = tag->tag_id;
+
+        rc_dec(tag);
+        return id;
+    }
+
+    critical_block(&tag->api_mutex) {
         /*
          * The app frees userdata once create returns an error.  A thread that still holds the tag
          * can tickle it and dispatch its events later; dispatch runs callbacks under this mutex
@@ -5605,8 +5634,8 @@ int32_t create_failed(plc_tag_p tag, int32_t rc) {
         tag->userdata = NULL;
     }
 
-    critical_block(&tag->instance->tag_lookup_mutex) { remove_tag_unsafe(tag->instance, (int64_t)tag->tag_id); }
-
+    /* the table's reference, then the creator's. */
+    rc_dec(tag);
     rc_dec(tag);
     return rc;
 }

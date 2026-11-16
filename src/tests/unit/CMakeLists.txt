@@ -94,6 +94,19 @@ target_include_directories(test_pccc_address PRIVATE
 
 target_link_libraries(test_pccc_address PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_conn_path_fc: Forward Close header (P1) and the 8-bit encoded path bound (P2).
+# Compiles session.c in to reach the static Forward Close encoder.
+add_executable(test_conn_path_fc test_conn_path_fc.c)
+
+target_include_directories(test_conn_path_fc PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_conn_path_fc PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_bounded_copy: the structural bounds on mem_copy_bounded() and the PCCC encode_data().
 # Pure computation over small heap buffers, so the sanitizer build is the real check -- no PLC.
 add_executable(test_bounded_copy test_bounded_copy.c)
@@ -307,6 +320,7 @@ add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
 add_test(NAME unit_test_pccc_address COMMAND test_pccc_address)
 add_test(NAME unit_test_tag_id_wrap COMMAND test_tag_id_wrap)
 add_test(NAME unit_test_bounded_copy COMMAND test_bounded_copy)
+add_test(NAME unit_test_conn_path_fc COMMAND test_conn_path_fc)
 # add_test(NAME unit_test_backoff COMMAND test_backoff)
 add_test(NAME unit_test_byte_slice COMMAND test_byte_slice)
 add_test(NAME unit_test_byte_buffer COMMAND test_byte_buffer)
@@ -318,7 +332,7 @@ add_test(NAME unit_test_debug_limit COMMAND test_debug_limit)
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
 # DISABLED until rolled-back code returns: DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_byte_buffer test_udt_size test_tag_schedule test_tag_registry test_debug_limit test_cip_status ${EXTRA_UNIT_TESTS}
-    DEPENDS test_platform_str test_fo_classify test_tag_name_bounds test_byte_slice test_byte_buffer test_debug_limit test_bounded_copy ${EXTRA_UNIT_TESTS}
+    DEPENDS test_platform_str test_fo_classify test_tag_name_bounds test_byte_slice test_byte_buffer test_debug_limit test_bounded_copy test_conn_path_fc ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

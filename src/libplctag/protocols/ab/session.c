@@ -522,7 +522,9 @@ bool session_connected_conflicts(cip_conn_p session, int use_connected_msg) {
     bool conflicts = false;
 
     critical_block(&session->session_mutex) {
-        conflicts = session->plc_type != AB_PLC_NONE && (use_connected_msg != 0) != (session->use_connected_msg != 0);
+        /* a DH+ route is always connected, whatever the tag's PLC defaults to. */
+        conflicts = session->plc_type != AB_PLC_NONE && !session->is_dhp
+                    && (use_connected_msg != 0) != (session->use_connected_msg != 0);
     }
 
     return conflicts;
@@ -761,7 +763,7 @@ cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, con
     if(conn_path_offset) {
         session->conn_path = (uint8_t *)(session) + conn_path_offset;
 
-        // FIXME - the path length cannot be 8 bits with a buffer length that is over 260.
+        /* cip_encode_path() keeps the path, Message Router included, under 256 bytes. */
         session->conn_path_size = (uint8_t)tmp_conn_path_size;
         mem_copy(session->conn_path, tmp_conn_path, tmp_conn_path_size);
     }
@@ -3266,6 +3268,9 @@ int session_forward_close(cip_conn_p session, exchange_t *ex) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting");
 
+    /* the buffer still holds the last packet; every field not set below must be zero. */
+    mem_set(session->data, 0, (int)(sizeof(*fc) + session->conn_path_size));
+
     fc = (eip_forward_close_req_t *)(session->data);
 
     /* point to the end of the struct */
@@ -3285,6 +3290,7 @@ int session_forward_close(cip_conn_p session, exchange_t *ex) {
     fc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fc->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fc->interface_handle))); /* total length of packet except for encap header */
+    fc->encap_session_handle = h2le32(session->session_handle);
     fc->encap_sender_context = h2le64(++session->session_seq_id);
     fc->router_timeout = h2le16(1); /* one second is enough ? */
 
