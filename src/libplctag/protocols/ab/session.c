@@ -116,6 +116,7 @@ typedef struct {
     int64_t deadline;
     bool want_reply;
     int32_t rc; /* why it failed */
+    bool net_error; /* it failed on the wire: the socket is no good any more. */
 } exchange_t;
 
 
@@ -156,7 +157,7 @@ static int session_match_valid(const char *host, const char *path, cip_conn_p se
 static int session_open_socket(cip_conn_p session);
 static void session_destroy(void *session);
 static int session_register(cip_conn_p session, exchange_t *ex);
-static int session_identify(cip_conn_p session);
+static int session_identify(cip_conn_p session, exchange_t *ex);
 static int session_close_socket(cip_conn_p session);
 static int session_unregister(cip_conn_p session, exchange_t *ex);
 static THREAD_FUNC(session_handler);
@@ -168,8 +169,6 @@ static size_t frame_room(cip_conn_p session, bool connected);
 static int frame_cip_request(cip_conn_p session, bool connected, size_t cip_size);
 static int check_response_framing(cip_conn_p session, size_t *reply_offset);
 static int prepare_request(cip_conn_p session);
-static int send_eip_request(cip_conn_p session, int timeout);
-static int recv_eip_response(cip_conn_p session, int timeout);
 static int send_begin(cip_conn_p session);
 static int send_some(cip_conn_p session, int timeout_ms);
 static void recv_begin(cip_conn_p session);
@@ -180,14 +179,12 @@ static ex_result_t exchange_step(cip_conn_p session, exchange_t *ex);
 static int exchange_wait_events(const exchange_t *ex);
 static int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, bool packed);
 // static int perform_forward_open(cip_conn_p session);
-static int perform_forward_close(cip_conn_p session);
+static int session_forward_close(cip_conn_p session, exchange_t *ex);
 // static int try_forward_open_ex(cip_conn_p session, int *max_payload_size_guess);
 // static int try_forward_open(cip_conn_p session);
 // static int send_forward_open_req(cip_conn_p session);
 // static int send_forward_open_req_ex(cip_conn_p session);
 // static int recv_forward_open_resp(cip_conn_p session, int *max_payload_size_guess);
-static int send_forward_close_req(cip_conn_p session);
-static int recv_forward_close_resp(cip_conn_p session);
 static uint16_t next_conn_serial_number(uint16_t current);
 static void encode_forward_open(cip_conn_p session, bool large);
 static void encode_plain_forward_open(cip_conn_p session);
@@ -195,8 +192,10 @@ static void encode_large_forward_open(cip_conn_p session);
 static void request_destroy(void *req_arg);
 static int session_request_increase_buffer(ab_request_p request, int new_capacity);
 static inline void session_publish_event(cip_conn_p session, int32_t event_type, int32_t status, int32_t reason);
-static void generic_step(cip_conn_p session, struct session_sm_s *sm);
 static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc);
+static void identify_step(cip_conn_p session, struct session_sm_s *sm);
+static void connected_step(cip_conn_p session, struct session_sm_s *sm);
+static void unconnected_step(cip_conn_p session, struct session_sm_s *sm);
 
 
 static mutex_t session_mutex;
@@ -771,8 +770,12 @@ cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, con
 
     /* fix up the rest of teh fields */
     session->plc_type = plc_type;
-    session->step = generic_step;
     session->use_connected_msg = *use_connected_msg;
+    if(plc_type == AB_PLC_NONE) {
+        session->step = identify_step;
+    } else {
+        session->step = *use_connected_msg ? connected_step : unconnected_step;
+    }
     session->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     session->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
     session->is_dhp = is_dhp;
@@ -844,7 +847,7 @@ int session_open_socket(cip_conn_p session) {
 
     /*
      * A reconnect reuses this session, so drop the identity of the connection that just
-     * went away.  Otherwise the checks in recv_eip_response() compare the new session's
+     * went away.  Otherwise the checks in recv_finish() compare the new session's
      * RegisterSession reply against the old handle and reject it, and the session can
      * never come back up.
      */
@@ -1060,23 +1063,16 @@ void session_destroy(void *session_arg) {
 
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
     critical_block(&session->session_mutex) {
-        /* close off the connection if is one. This helps the PLC clean up. */
-        if(session->targ_connection_id) {
-            /*
-             * we do not want the internal loop to immediately
-             * return, so set the flag like we are not terminating.
-             * There is still a timeout that applies.
-             */
-            atomic_set_int32(&session->terminating, 0);
-            perform_forward_close(session);
-            atomic_set_int32(&session->terminating, 1);
-        }
-
-        /* try to be nice and un-register the session; the deadline in the exchange bounds this. */
-        if(session->session_handle) {
+        /* be nice: close the connection and unregister.  The exchange deadline bounds each. */
+        if(session->sock) {
             exchange_t ex = {.state = EX_IDLE};
 
-            while(session_unregister(session, &ex) == PLCTAG_STATUS_PENDING) {
+            while(session_forward_close(session, &ex) == PLCTAG_STATUS_PENDING) {
+                socket_wait_event(session->sock, SOCK_EVENT_TIMEOUT | exchange_wait_events(&ex), SOCKET_WAIT_TIMEOUT_MS);
+            }
+
+            /* a network error is fatal: nothing more can be said on this socket. */
+            while(!ex.net_error && session_unregister(session, &ex) == PLCTAG_STATUS_PENDING) {
                 socket_wait_event(session->sock, SOCK_EVENT_TIMEOUT | exchange_wait_events(&ex), SOCKET_WAIT_TIMEOUT_MS);
             }
         }
@@ -1184,19 +1180,21 @@ int session_add_request(cip_conn_p session, ab_request_p req) {
 
 
 typedef enum {
-    SESSION_OPEN_SOCKET_START,
-    SESSION_OPEN_SOCKET_WAIT,
+    SESSION_OPEN_SOCKET = 0,
+    SESSION_CONNECT_WAIT,
     SESSION_REGISTER,
     SESSION_IDENTIFY,
+    SESSION_IDENTIFIED,
     SESSION_FORWARD_OPEN,
     SESSION_IDLE,
-    SESSION_DISCONNECT,
+    SESSION_FORWARD_CLOSE,
     SESSION_UNREGISTER,
     SESSION_CLOSE_SOCKET,
-    SESSION_START_RETRY,
-    SESSION_WAIT_ERR_RETRY,
-    SESSION_WAIT_IDLE_RECONNECT
+    SESSION_BACKOFF_WAIT,
+    SESSION_IDLE_WAIT
 } session_state_t;
+
+typedef enum { PHASE_PENDING, PHASE_DONE, PHASE_FAILED, PHASE_NET_ERROR } phase_t;
 
 /* what a session's state machine keeps between passes of the handler loop. */
 typedef struct session_sm_s {
@@ -1206,8 +1204,7 @@ typedef struct session_sm_s {
     int64_t auto_disconnect_time;
     int32_t inactivity_timeout_ms;
     backoff_t retry_backoff;
-    int64_t retry_wait_ms;
-    int auto_disconnect;
+    bool auto_disconnect;
     exchange_t ex; /* the exchange in flight, if any */
     fo_neg_t fo;   /* the Forward Open negotiation */
     req_batch_t batch; /* the requests in flight */
@@ -1217,27 +1214,13 @@ static int fo_step(cip_conn_p session, session_sm_t *sm);
 static int requests_step(cip_conn_p session, session_sm_t *sm);
 static void requeue_batch(cip_conn_p session, req_batch_t *b);
 
-static void generic_step(cip_conn_p session, session_sm_t *sm);
-static void logix_step(cip_conn_p session, session_sm_t *sm);
-static void pccc_step(cip_conn_p session, session_sm_t *sm);
 
-
-/* Identify, which runs in the generic machine, is the only later caller, on the handler thread. */
-void session_setup_generic(cip_conn_p conn) { conn->step = generic_step; }
-
-void session_setup_logix(cip_conn_p conn) { conn->step = logix_step; }
-
-/* a DH+ route goes through a Logix bridge over a Forward Open, which the generic machine runs. */
-void session_setup_pccc(cip_conn_p conn) { conn->step = conn->is_dhp ? generic_step : pccc_step; }
-
-
-/* copy what the PLC type sets on its connection, then let it install its state machine. */
+/* copy what the PLC type sets on its connection. */
 static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc) {
     session->plc_type = plc->id;
     /* the attribute can only add the restriction, never lift it from a type without the Large FO. */
     if(plc->fo_ex_conn_size == 0) { session->only_use_old_forward_open = true; }
     session->max_payload_size = (uint16_t)plc->fo_conn_size;
-    plc->setup_conn(session);
 }
 
 
@@ -1547,945 +1530,344 @@ static int fo_step(cip_conn_p session, session_sm_t *sm) {
 
 
 /*
- * Every state, for a session whose PLC type is not known yet and for the PLC types without their own
- * machine (Micro800, PCCC-mapped Logix, PLC/5 and SLC over DH+, generic CIP).  Identify runs here.
+ * Phases.  Each runs one non-blocking pass of its part of the connection and says how it went:
+ * PHASE_PENDING to be called again, PHASE_DONE or PHASE_FAILED to move on, PHASE_NET_ERROR when
+ * the socket is no good.  The machines below decide where each outcome leads.
  */
-static void generic_step(cip_conn_p session, session_sm_t *sm) {
+
+/* a failure on the wire is fatal to the socket; any other is the PLC's answer. */
+static phase_t failure(const session_sm_t *sm) { return sm->ex.net_error ? PHASE_NET_ERROR : PHASE_FAILED; }
+
+/* (re)start the inactivity clock. */
+static void inactivity_restart(cip_conn_p session, session_sm_t *sm) {
+    sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
+    sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
+}
+
+
+/* start the connect; CONNECT_WAIT finishes it, even one that completed at once. */
+static phase_t open_socket_phase(cip_conn_p session, session_sm_t *sm) {
     int rc = PLCTAG_STATUS_OK;
 
-    switch(sm->state) {
-        case SESSION_OPEN_SOCKET_START:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET state.");
 
-            /* every connect gets the full set of Forward Open retries. */
-            sm->fo.state = FO_START;
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
+    /* every connect gets the full set of Forward Open retries. */
+    sm->fo.state = FO_START;
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
-            /* we must connect to the gateway*/
-            rc = session_open_socket(session);
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session connect failed %s!", plc_tag_decode_error(rc));
-                atomic_set_int32(&session->connection_status_reason, rc);
-                sm->state = SESSION_CLOSE_SOCKET;
-            } else {
-                if(rc == PLCTAG_STATUS_OK) {
-                    /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
-                    sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                    sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
+    rc = session_open_socket(session);
 
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "Connect complete immediately, going to state SESSION_REGISTER.");
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session connect failed %s!", plc_tag_decode_error(rc));
+        atomic_set_int32(&session->connection_status_reason, rc);
+        return PHASE_NET_ERROR;
+    }
 
-                    sm->state = SESSION_REGISTER;
+    return PHASE_DONE;
+}
 
-                } else {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
 
-                    sm->state = SESSION_OPEN_SOCKET_WAIT;
-                }
-            }
+static phase_t connect_wait_phase(cip_conn_p session, session_sm_t *sm) {
+    int rc = PLCTAG_STATUS_OK;
 
-            /* in all cases, don't wait. */
-            socket_wake(session->sock);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_CONNECT_WAIT state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
-            break;
+    rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
 
-        case SESSION_OPEN_SOCKET_WAIT:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_WAIT state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
+    if(rc == PLCTAG_ERR_TIMEOUT) { return PHASE_PENDING; }
 
-            /* we must connect to the gateway */
-            rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
-            if(rc == PLCTAG_STATUS_OK) {
-                /* connected! */
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Socket connection succeeded.");
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
+        atomic_set_int32(&session->connection_status_reason, rc);
+        return PHASE_NET_ERROR;
+    }
 
-                /* calculate the disconnect time. */
-                sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Socket connection succeeded.");
+    inactivity_restart(session, sm);
 
-                sm->state = SESSION_REGISTER;
-            } else if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Still waiting for connection to succeed.");
+    return PHASE_DONE;
+}
 
-                /* don't wait more.  The TCP connect check will wait in select(). */
-            } else {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
-                atomic_set_int32(&session->connection_status_reason, rc);
 
-                sm->state = SESSION_CLOSE_SOCKET;
-            }
+static phase_t register_phase(cip_conn_p session, session_sm_t *sm) {
+    int rc = PLCTAG_STATUS_OK;
 
-            /* in all cases, don't wait. */
-            socket_wake(session->sock);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_REGISTER state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
-            break;
+    if((rc = session_register(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { return PHASE_PENDING; }
 
-        case SESSION_REGISTER:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_REGISTER state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session registration failed %s!", plc_tag_decode_error(rc));
+        atomic_set_int32(&session->connection_status_reason, rc);
+        return failure(sm);
+    }
 
-            if((rc = session_register(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { break; }
+    return PHASE_DONE;
+}
 
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session registration failed %s!", plc_tag_decode_error(rc));
-                atomic_set_int32(&session->connection_status_reason, rc);
-                sm->state = SESSION_CLOSE_SOCKET;
-            } else {
-                plc_type_t plc_type = AB_PLC_NONE;
-                int32_t refused_rc = PLCTAG_STATUS_OK;
 
-                sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
+/* PHASE_FAILED for a refusal, which is asked again on each reconnect. */
+static phase_t identify_phase(cip_conn_p session, session_sm_t *sm) {
+    int rc = PLCTAG_STATUS_OK;
 
-                critical_block(&session->session_mutex) {
-                    plc_type = session->plc_type;
-                    refused_rc = session->refused_rc;
-                }
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDENTIFY state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
-                (void)refused_rc;
+    if((rc = session_identify(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { return PHASE_PENDING; }
 
-                /* a refused identify is asked again on each reconnect, as a refused route is. */
-                if(plc_type == AB_PLC_NONE) {
-                    sm->state = SESSION_IDENTIFY;
-                } else if(session->use_connected_msg) {
-                    sm->state = SESSION_FORWARD_OPEN;
-                } else {
-                    sm->state = SESSION_IDLE;
-                }
-            }
-            socket_wake(session->sock);
-            break;
+    if(rc != PLCTAG_STATUS_OK) {
+        atomic_set_int32(&session->connection_status_reason, rc);
+        return failure(sm);
+    }
 
-        case SESSION_IDENTIFY:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDENTIFY state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
+    return session_refused(session) ? PHASE_FAILED : PHASE_DONE;
+}
 
-            /* a network failure retries; an answer, even a refusal, is final. */
-            if((rc = session_identify(session)) != PLCTAG_STATUS_OK) {
-                atomic_set_int32(&session->connection_status_reason, rc);
-                sm->state = SESSION_UNREGISTER;
-            } else if(session_refused(session)) {
-                sm->state = SESSION_UNREGISTER;
-            } else if(session->use_connected_msg) {
-                sm->state = SESSION_FORWARD_OPEN;
-            } else {
-                sm->state = SESSION_IDLE;
-            }
-            socket_wake(session->sock);
-            break;
 
-        case SESSION_FORWARD_OPEN:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_FORWARD_OPEN state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
+static phase_t forward_open_phase(cip_conn_p session, session_sm_t *sm) {
+    int rc = PLCTAG_STATUS_OK;
 
-            if((rc = fo_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_FORWARD_OPEN state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
-            if(rc == PLCTAG_STATUS_OK) {
-                sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-                sm->state = SESSION_IDLE;
-            } else {
-                /* unregister anyway, then close the socket. */
-                sm->state = SESSION_UNREGISTER;
-            }
-            socket_wake(session->sock);
-            break;
+    if((rc = fo_step(session, sm)) == PLCTAG_STATUS_PENDING) { return PHASE_PENDING; }
 
-        case SESSION_IDLE:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_UP, PLCTAG_STATUS_OK);
+    return (rc == PLCTAG_STATUS_OK) ? PHASE_DONE : failure(sm);
+}
 
-            /*
-             * Reaching idle is the only thing that counts as a successful connect, so it is the only
-             * place the backoff restarts and a refusal is forgotten.
-             */
-            backoff_reset(&sm->retry_backoff);
-            critical_block(&session->session_mutex) { session->refused_rc = PLCTAG_STATUS_OK; }
 
-            /* make sure that our timeout period has not changed */
-            if(sm->inactivity_timeout_ms != atomic_get_int32(&session->connection_inactivity_timeout_ms)) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                       "Inactivity timeout changed from %" PRId32 "ms to %" PRId32 "ms, updating auto disconnect time.",
-                       sm->inactivity_timeout_ms, atomic_get_int32(&session->connection_inactivity_timeout_ms));
-                sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-            }
+/*
+ * Run requests until the connection has been idle too long (PHASE_DONE) or a batch fails
+ * (PHASE_FAILED, its requests back on the queue).
+ */
+static phase_t idle_phase(cip_conn_p session, session_sm_t *sm) {
+    int32_t inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
+    int num_reqs = 0;
+    int rc = PLCTAG_STATUS_OK;
 
-            /* if there is work to do, make sure we do not disconnect. */
-            critical_block(&session->session_mutex) {
-                int num_reqs = vector_length(session->requests);
-                if(num_reqs > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are %d requests pending before cleanup and sending.", num_reqs);
-                    sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                    sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-                }
-            }
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_UP, PLCTAG_STATUS_OK);
 
-            /* a batch in flight: nothing else to decide until it is done. */
-            if((rc = requests_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
+    /* reaching idle is the only proof of a working connect: the backoff restarts and a refusal is forgotten. */
+    backoff_reset(&sm->retry_backoff);
+    critical_block(&session->session_mutex) {
+        session->refused_rc = PLCTAG_STATUS_OK;
+        num_reqs = vector_length(session->requests);
+    }
 
-            if(rc != PLCTAG_STATUS_OK) {
-                atomic_set_int32(&session->connection_status_reason, rc);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while processing requests %s!",
-                       plc_tag_decode_error(rc));
-                if(session->use_connected_msg) {
-                    sm->state = SESSION_DISCONNECT;
-                } else {
-                    sm->state = SESSION_UNREGISTER;
-                }
+    /* queued work or a changed timeout keeps the connection up. */
+    if(num_reqs > 0 || sm->inactivity_timeout_ms != inactivity_timeout_ms) { inactivity_restart(session, sm); }
 
-                socket_wake(session->sock);
-            }
+    /* a batch in flight: nothing else to decide until it is done. */
+    if((rc = requests_step(session, sm)) == PLCTAG_STATUS_PENDING) { return PHASE_PENDING; }
 
-            /* check if we should disconnect */
-            if(sm->auto_disconnect_time < sm->now) {
-                atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Disconnecting due to inactivity.");
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while processing requests %s!", plc_tag_decode_error(rc));
+        atomic_set_int32(&session->connection_status_reason, rc);
+        return failure(sm);
+    }
 
-                sm->auto_disconnect = 1;
+    if(sm->auto_disconnect_time < sm->now) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Disconnecting due to inactivity.");
+        atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
+        sm->auto_disconnect = true;
+        return PHASE_DONE;
+    }
 
-                if(session->use_connected_msg) {
-                    sm->state = SESSION_DISCONNECT;
-                } else {
-                    sm->state = SESSION_UNREGISTER;
-                }
-                socket_wake(session->sock);
-            }
+    /* more queued: come straight back. */
+    critical_block(&session->session_mutex) { num_reqs = vector_length(session->requests); }
+    if(num_reqs > 0) { socket_wake(session->sock); }
 
-            /* if there is work to do, make sure we wake the handler. */
-            critical_block(&session->session_mutex) {
-                int num_reqs = vector_length(session->requests);
-                if(num_reqs > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are %d requests still pending after abort purge and sending.", num_reqs);
-                    socket_wake(session->sock);
-                }
-            }
+    return PHASE_PENDING;
+}
 
-            break;
 
-        case SESSION_DISCONNECT:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_DISCONNECT state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING,
-                                          atomic_get_int32(&session->connection_status_reason));
+/* teardown goes on whatever the PLC says. */
+static phase_t forward_close_phase(cip_conn_p session, session_sm_t *sm) {
+    int rc = PLCTAG_STATUS_OK;
 
-            if((rc = perform_forward_close(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward close failed %s!", plc_tag_decode_error(rc));
-            }
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_FORWARD_CLOSE state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING, atomic_get_int32(&session->connection_status_reason));
 
-            sm->state = SESSION_UNREGISTER;
-            socket_wake(session->sock);
-            break;
+    if((rc = session_forward_close(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { return PHASE_PENDING; }
 
-        case SESSION_UNREGISTER:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_UNREGISTER state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING,
-                                          atomic_get_int32(&session->connection_status_reason));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward close failed %s!", plc_tag_decode_error(rc));
+        if(sm->ex.net_error) { return PHASE_NET_ERROR; }
+    }
 
-            if((rc = session_unregister(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { break; }
+    return PHASE_DONE;
+}
 
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unregistering session failed %s!", plc_tag_decode_error(rc));
-            }
 
+/* teardown goes on whatever happens. */
+static phase_t unregister_phase(cip_conn_p session, session_sm_t *sm) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_UNREGISTER state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING, atomic_get_int32(&session->connection_status_reason));
+
+    if((rc = session_unregister(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { return PHASE_PENDING; }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unregistering session failed %s!", plc_tag_decode_error(rc));
+    }
+
+    return PHASE_DONE;
+}
+
+
+/* close the socket and, unless this was an inactivity disconnect, start the backoff. */
+static void close_socket_phase(cip_conn_p session, session_sm_t *sm) {
+    int64_t retry_wait_ms = 0;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_CLOSE_SOCKET state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_DOWN, atomic_get_int32(&session->connection_status_reason));
+
+    session_close_socket(session);
+
+    /* a refusal waits the longest before asking again. */
+    if(session_refused(session)) {
+        backoff_saturate(&sm->retry_backoff);
+        sm->auto_disconnect = false;
+    }
+
+    if(sm->auto_disconnect) { return; }
+
+    /* the cap is a live attribute, so it is read on every retry. */
+    backoff_set_max_ms(&sm->retry_backoff, atomic_get_int32(&session->connection_retry_max_delay_ms));
+    retry_wait_ms = backoff_wait_ms(&sm->retry_backoff);
+    sm->timeout_time = sm->now + retry_wait_ms;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.",
+           sm->retry_backoff.attempts, retry_wait_ms);
+}
+
+
+static phase_t backoff_wait_phase(cip_conn_p session, session_sm_t *sm) {
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_BACKOFF_WAIT state.");
+
+    /* tags waiting on a refused session, or created during the wait, get the refusal at once. */
+    if(session_refused(session)) { fail_queued_requests(session); }
+
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_ERR_WAIT, atomic_get_int32(&session->connection_status_reason));
+
+    return (sm->timeout_time < sm->now) ? PHASE_DONE : PHASE_PENDING;
+}
+
+
+/* after an inactivity disconnect: sleep until a request arrives. */
+static phase_t idle_wait_phase(cip_conn_p session, session_sm_t *sm) {
+    int num_reqs = 0;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE_WAIT state.");
+    session_set_connection_status(session, PLCTAG_CONN_STATUS_IDLE_WAIT, atomic_get_int32(&session->connection_status_reason));
+
+    critical_block(&session->session_mutex) { num_reqs = vector_length(session->requests); }
+
+    if(num_reqs == 0) { return PHASE_PENDING; }
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "There are requests waiting, reopening connection to PLC.");
+    sm->auto_disconnect = false;
+
+    return PHASE_DONE;
+}
+
+
+/*
+ * Move on by the outcome; pending stays put.  A network error is always fatal: nothing more can be
+ * said on the socket, so it is closed and the retry backoff starts, from any state.
+ */
+static void next_state(session_sm_t *sm, phase_t outcome, session_state_t on_done, session_state_t on_failed) {
+    switch(outcome) {
+        case PHASE_PENDING: break;
+        case PHASE_DONE: sm->state = on_done; break;
+        case PHASE_FAILED: sm->state = on_failed; break;
+        case PHASE_NET_ERROR:
+            sm->auto_disconnect = false;
             sm->state = SESSION_CLOSE_SOCKET;
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_CLOSE_SOCKET:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_CLOSE_SOCKET state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_DOWN,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if((rc = session_close_socket(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Closing session socket failed %s!", plc_tag_decode_error(rc));
-            }
-
-            if(session_refused(session)) {
-                /* a refusal waits the longest before asking again. */
-                backoff_saturate(&sm->retry_backoff);
-                sm->state = SESSION_START_RETRY;
-            } else if(sm->auto_disconnect) {
-                sm->state = SESSION_WAIT_IDLE_RECONNECT;
-            } else {
-                sm->state = SESSION_START_RETRY;
-            }
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_START_RETRY:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_START_RETRY state.");
-
-            /* the cap is a live attribute, so it is read on every retry. */
-            backoff_set_max_ms(&sm->retry_backoff, atomic_get_int32(&session->connection_retry_max_delay_ms));
-            sm->retry_wait_ms = backoff_wait_ms(&sm->retry_backoff);
-            sm->timeout_time = sm->now + sm->retry_wait_ms;
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.",
-                   sm->retry_backoff.attempts, sm->retry_wait_ms);
-
-            /* tags waiting on a refused session get the refusal, not the wait. */
-            if(session_refused(session)) { fail_queued_requests(session); }
-
-            /* start waiting. */
-            sm->state = SESSION_WAIT_ERR_RETRY;
-
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_WAIT_ERR_RETRY:
-            /* a tag created during the wait after a refusal gets the refusal at once. */
-            if(session_refused(session)) { fail_queued_requests(session); }
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_WAIT_ERR_RETRY state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_ERR_WAIT,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if(sm->timeout_time < sm->now) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Transitioning to SESSION_OPEN_SOCKET_START.");
-                sm->state = SESSION_OPEN_SOCKET_START;
-                socket_wake(session->sock);
-            } else {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Wait not complete, still %dms to go.",
-                       (int)(sm->timeout_time - sm->now));
-            }
-
-            break;
-
-        case SESSION_WAIT_IDLE_RECONNECT:
-            /* wait for at least one request to queue before reconnecting. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_WAIT_IDLE_RECONNECT state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_IDLE_WAIT,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            sm->auto_disconnect = 0;
-
-            /* if there is work to do, reconnect.. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Critical block.");
-            critical_block(&session->session_mutex) {
-                if(vector_length(session->requests) > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are requests waiting, reopening connection to PLC.");
-
-                    sm->state = SESSION_OPEN_SOCKET_START;
-                    socket_wake(session->sock);
-                }
-            }
-
-            break;
-
-
-
-        default:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unknown state %d!", sm->state);
-
-            /* FIXME - this logic is not complete.  We might be here without
-             * a connected session or a registered session. */
-
-            atomic_set_int32(&session->connection_status_reason, PLCTAG_ERR_UNSUPPORTED);
-            if(session->use_connected_msg) {
-                sm->state = SESSION_DISCONNECT;
-            } else {
-                sm->state = SESSION_UNREGISTER;
-            }
-
-            socket_wake(session->sock);
             break;
     }
 }
 
 
 /*
- * ControlLogix and CompactLogix: Forward Open (extended, then the old form if refused), requests over
- * the connection, Forward Close.  An unconnected session goes straight from register to idle.
+ * The machines.  A network error goes straight to CLOSE_SOCKET from any state (next_state).  Any
+ * other exit says goodbye in order: Forward Close if a connection is open, unregister, close.
  */
-static void logix_step(cip_conn_p session, session_sm_t *sm) {
-    int rc = PLCTAG_STATUS_OK;
 
+/* the states every machine has, from the socket up to register and back down from unregister. */
+static void common_step(cip_conn_p session, session_sm_t *sm) {
     switch(sm->state) {
-        case SESSION_OPEN_SOCKET_START:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
-
-            /* every connect gets the full set of Forward Open retries. */
-            sm->fo.state = FO_START;
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
-
-            /* we must connect to the gateway*/
-            rc = session_open_socket(session);
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session connect failed %s!", plc_tag_decode_error(rc));
-                atomic_set_int32(&session->connection_status_reason, rc);
-                sm->state = SESSION_CLOSE_SOCKET;
-            } else {
-                if(rc == PLCTAG_STATUS_OK) {
-                    /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
-                    sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                    sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "Connect complete immediately, going to state SESSION_REGISTER.");
-
-                    sm->state = SESSION_REGISTER;
-
-                } else {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
-
-                    sm->state = SESSION_OPEN_SOCKET_WAIT;
-                }
-            }
-
-            /* in all cases, don't wait. */
-            socket_wake(session->sock);
-
-            break;
-
-        case SESSION_OPEN_SOCKET_WAIT:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_WAIT state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
-
-            /* we must connect to the gateway */
-            rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
-            if(rc == PLCTAG_STATUS_OK) {
-                /* connected! */
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Socket connection succeeded.");
-
-                /* calculate the disconnect time. */
-                sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-
-                sm->state = SESSION_REGISTER;
-            } else if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Still waiting for connection to succeed.");
-
-                /* don't wait more.  The TCP connect check will wait in select(). */
-            } else {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
-                atomic_set_int32(&session->connection_status_reason, rc);
-
-                sm->state = SESSION_CLOSE_SOCKET;
-            }
-
-            /* in all cases, don't wait. */
-            socket_wake(session->sock);
-
-            break;
-
-        case SESSION_REGISTER:
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_REGISTER state.");
-        session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
-
-        if((rc = session_register(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { break; }
-
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session registration failed %s!", plc_tag_decode_error(rc));
-            atomic_set_int32(&session->connection_status_reason, rc);
-            sm->state = SESSION_CLOSE_SOCKET;
-        } else {
-            sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-            sm->state = (session->use_connected_msg ? SESSION_FORWARD_OPEN : SESSION_IDLE);
-        }
-        socket_wake(session->sock);
-        break;
-
-        case SESSION_FORWARD_OPEN:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_FORWARD_OPEN state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
-
-            if((rc = fo_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
-
-            if(rc == PLCTAG_STATUS_OK) {
-                sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-                sm->state = SESSION_IDLE;
-            } else {
-                /* unregister anyway, then close the socket. */
-                sm->state = SESSION_UNREGISTER;
-            }
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_IDLE:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_UP, PLCTAG_STATUS_OK);
-
-            /*
-             * Reaching idle is the only thing that counts as a successful connect, so it is the only
-             * place the backoff restarts and a refusal is forgotten.
-             */
-            backoff_reset(&sm->retry_backoff);
-            critical_block(&session->session_mutex) { session->refused_rc = PLCTAG_STATUS_OK; }
-
-            /* make sure that our timeout period has not changed */
-            if(sm->inactivity_timeout_ms != atomic_get_int32(&session->connection_inactivity_timeout_ms)) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                       "Inactivity timeout changed from %" PRId32 "ms to %" PRId32 "ms, updating auto disconnect time.",
-                       sm->inactivity_timeout_ms, atomic_get_int32(&session->connection_inactivity_timeout_ms));
-                sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-            }
-
-            /* if there is work to do, make sure we do not disconnect. */
-            critical_block(&session->session_mutex) {
-                int num_reqs = vector_length(session->requests);
-                if(num_reqs > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are %d requests pending before cleanup and sending.", num_reqs);
-                    sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                    sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-                }
-            }
-
-            /* a batch in flight: nothing else to decide until it is done. */
-            if((rc = requests_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
-
-            if(rc != PLCTAG_STATUS_OK) {
-                atomic_set_int32(&session->connection_status_reason, rc);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while processing requests %s!",
-                       plc_tag_decode_error(rc));
-                if(session->use_connected_msg) {
-                    sm->state = SESSION_DISCONNECT;
-                } else {
-                    sm->state = SESSION_UNREGISTER;
-                }
-
-                socket_wake(session->sock);
-            }
-
-            /* check if we should disconnect */
-            if(sm->auto_disconnect_time < sm->now) {
-                atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Disconnecting due to inactivity.");
-
-                sm->auto_disconnect = 1;
-
-                if(session->use_connected_msg) {
-                    sm->state = SESSION_DISCONNECT;
-                } else {
-                    sm->state = SESSION_UNREGISTER;
-                }
-                socket_wake(session->sock);
-            }
-
-            /* if there is work to do, make sure we wake the handler. */
-            critical_block(&session->session_mutex) {
-                int num_reqs = vector_length(session->requests);
-                if(num_reqs > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are %d requests still pending after abort purge and sending.", num_reqs);
-                    socket_wake(session->sock);
-                }
-            }
-
-            break;
-
-        case SESSION_DISCONNECT:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_DISCONNECT state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if((rc = perform_forward_close(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward close failed %s!", plc_tag_decode_error(rc));
-            }
-
-            sm->state = SESSION_UNREGISTER;
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_UNREGISTER:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_UNREGISTER state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if((rc = session_unregister(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { break; }
-
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unregistering session failed %s!", plc_tag_decode_error(rc));
-            }
-
-            sm->state = SESSION_CLOSE_SOCKET;
-            socket_wake(session->sock);
-            break;
-
+        case SESSION_OPEN_SOCKET: next_state(sm, open_socket_phase(session, sm), SESSION_CONNECT_WAIT, SESSION_CLOSE_SOCKET); break;
+        case SESSION_CONNECT_WAIT: next_state(sm, connect_wait_phase(session, sm), SESSION_REGISTER, SESSION_CLOSE_SOCKET); break;
+        case SESSION_UNREGISTER: next_state(sm, unregister_phase(session, sm), SESSION_CLOSE_SOCKET, SESSION_CLOSE_SOCKET); break;
         case SESSION_CLOSE_SOCKET:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_CLOSE_SOCKET state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_DOWN,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if((rc = session_close_socket(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Closing session socket failed %s!", plc_tag_decode_error(rc));
-            }
-
-            if(session_refused(session)) {
-                /* a refusal waits the longest before asking again. */
-                backoff_saturate(&sm->retry_backoff);
-                sm->state = SESSION_START_RETRY;
-            } else if(sm->auto_disconnect) {
-                sm->state = SESSION_WAIT_IDLE_RECONNECT;
-            } else {
-                sm->state = SESSION_START_RETRY;
-            }
-            socket_wake(session->sock);
+            close_socket_phase(session, sm);
+            sm->state = sm->auto_disconnect ? SESSION_IDLE_WAIT : SESSION_BACKOFF_WAIT;
             break;
-
-        case SESSION_START_RETRY:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_START_RETRY state.");
-
-            /* the cap is a live attribute, so it is read on every retry. */
-            backoff_set_max_ms(&sm->retry_backoff, atomic_get_int32(&session->connection_retry_max_delay_ms));
-            sm->retry_wait_ms = backoff_wait_ms(&sm->retry_backoff);
-            sm->timeout_time = sm->now + sm->retry_wait_ms;
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.",
-                   sm->retry_backoff.attempts, sm->retry_wait_ms);
-
-            /* tags waiting on a refused session get the refusal, not the wait. */
-            if(session_refused(session)) { fail_queued_requests(session); }
-
-            /* start waiting. */
-            sm->state = SESSION_WAIT_ERR_RETRY;
-
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_WAIT_ERR_RETRY:
-            /* a tag created during the wait after a refusal gets the refusal at once. */
-            if(session_refused(session)) { fail_queued_requests(session); }
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_WAIT_ERR_RETRY state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_ERR_WAIT,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if(sm->timeout_time < sm->now) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Transitioning to SESSION_OPEN_SOCKET_START.");
-                sm->state = SESSION_OPEN_SOCKET_START;
-                socket_wake(session->sock);
-            } else {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Wait not complete, still %dms to go.",
-                       (int)(sm->timeout_time - sm->now));
-            }
-
-            break;
-
-        case SESSION_WAIT_IDLE_RECONNECT:
-            /* wait for at least one request to queue before reconnecting. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_WAIT_IDLE_RECONNECT state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_IDLE_WAIT,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            sm->auto_disconnect = 0;
-
-            /* if there is work to do, reconnect.. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Critical block.");
-            critical_block(&session->session_mutex) {
-                if(vector_length(session->requests) > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are requests waiting, reopening connection to PLC.");
-
-                    sm->state = SESSION_OPEN_SOCKET_START;
-                    socket_wake(session->sock);
-                }
-            }
-
-            break;
-
-
-
+        case SESSION_BACKOFF_WAIT: next_state(sm, backoff_wait_phase(session, sm), SESSION_OPEN_SOCKET, SESSION_OPEN_SOCKET); break;
+        case SESSION_IDLE_WAIT: next_state(sm, idle_wait_phase(session, sm), SESSION_OPEN_SOCKET, SESSION_OPEN_SOCKET); break;
         default:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unknown state %d!", sm->state);
-
-            /* FIXME - this logic is not complete.  We might be here without
-             * a connected session or a registered session. */
-
-            atomic_set_int32(&session->connection_status_reason, PLCTAG_ERR_UNSUPPORTED);
-            if(session->use_connected_msg) {
-                sm->state = SESSION_DISCONNECT;
-            } else {
-                sm->state = SESSION_UNREGISTER;
-            }
-
-            socket_wake(session->sock);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "State %d does not belong to this machine!", sm->state);
+            sm->state = SESSION_CLOSE_SOCKET;
             break;
     }
 }
 
 
 /*
- * PLC/5, SLC and MicroLogix reached directly: unconnected, so register, requests, unregister.  No
- * Forward Open and no Forward Close.
+ * Connected: register, Forward Open, requests over the connection, Forward Close.  Logix (default),
+ * Micro800, Omron, and PLC/5 or SLC over DH+ (the connection is to the bridge).
  */
-static void pccc_step(cip_conn_p session, session_sm_t *sm) {
-    int rc = PLCTAG_STATUS_OK;
-
+static void connected_step(cip_conn_p session, session_sm_t *sm) {
     switch(sm->state) {
-        case SESSION_OPEN_SOCKET_START:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
+        case SESSION_REGISTER: next_state(sm, register_phase(session, sm), SESSION_FORWARD_OPEN, SESSION_CLOSE_SOCKET); break;
+        case SESSION_FORWARD_OPEN: next_state(sm, forward_open_phase(session, sm), SESSION_IDLE, SESSION_UNREGISTER); break;
+        case SESSION_IDLE: next_state(sm, idle_phase(session, sm), SESSION_FORWARD_CLOSE, SESSION_FORWARD_CLOSE); break;
+        case SESSION_FORWARD_CLOSE: next_state(sm, forward_close_phase(session, sm), SESSION_UNREGISTER, SESSION_UNREGISTER); break;
+        default: common_step(session, sm); break;
+    }
+}
 
-            /* every connect gets the full set of Forward Open retries. */
-            sm->fo.state = FO_START;
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
-            /* we must connect to the gateway*/
-            rc = session_open_socket(session);
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session connect failed %s!", plc_tag_decode_error(rc));
-                atomic_set_int32(&session->connection_status_reason, rc);
-                sm->state = SESSION_CLOSE_SOCKET;
-            } else {
-                if(rc == PLCTAG_STATUS_OK) {
-                    /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
-                    sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                    sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
+/*
+ * Unconnected: register, requests, unregister.  PLC/5, SLC and MicroLogix reached directly, Logix
+ * PCCC, generic CIP, and any type with use_connected_msg=0.
+ */
+static void unconnected_step(cip_conn_p session, session_sm_t *sm) {
+    switch(sm->state) {
+        case SESSION_REGISTER: next_state(sm, register_phase(session, sm), SESSION_IDLE, SESSION_CLOSE_SOCKET); break;
+        case SESSION_IDLE: next_state(sm, idle_phase(session, sm), SESSION_UNREGISTER, SESSION_UNREGISTER); break;
+        default: common_step(session, sm); break;
+    }
+}
 
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "Connect complete immediately, going to state SESSION_REGISTER.");
 
-                    sm->state = SESSION_REGISTER;
-
-                } else {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
-
-                    sm->state = SESSION_OPEN_SOCKET_WAIT;
-                }
-            }
-
-            /* in all cases, don't wait. */
-            socket_wake(session->sock);
-
+/*
+ * No plc=: register, then read the Identity object.  Once the type is known the connection hands
+ * over to its flow, which takes it from the same registered socket: connected at Forward Open,
+ * unconnected at idle.  A refusal tears down and is asked again on each reconnect.
+ */
+static void identify_step(cip_conn_p session, session_sm_t *sm) {
+    switch(sm->state) {
+        case SESSION_REGISTER: next_state(sm, register_phase(session, sm), SESSION_IDENTIFY, SESSION_CLOSE_SOCKET); break;
+        case SESSION_IDENTIFY: next_state(sm, identify_phase(session, sm), SESSION_IDENTIFIED, SESSION_UNREGISTER); break;
+        case SESSION_IDENTIFIED:
+            /* hand over to the type's flow, on the same registered socket. */
+            session->step = session->use_connected_msg ? connected_step : unconnected_step;
+            sm->state = session->use_connected_msg ? SESSION_FORWARD_OPEN : SESSION_IDLE;
             break;
-
-        case SESSION_OPEN_SOCKET_WAIT:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_WAIT state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
-
-            /* we must connect to the gateway */
-            rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
-            if(rc == PLCTAG_STATUS_OK) {
-                /* connected! */
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Socket connection succeeded.");
-
-                /* calculate the disconnect time. */
-                sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-
-                sm->state = SESSION_REGISTER;
-            } else if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Still waiting for connection to succeed.");
-
-                /* don't wait more.  The TCP connect check will wait in select(). */
-            } else {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
-                atomic_set_int32(&session->connection_status_reason, rc);
-
-                sm->state = SESSION_CLOSE_SOCKET;
-            }
-
-            /* in all cases, don't wait. */
-            socket_wake(session->sock);
-
-            break;
-
-        case SESSION_REGISTER:
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_REGISTER state.");
-        session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
-
-        if((rc = session_register(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { break; }
-
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session registration failed %s!", plc_tag_decode_error(rc));
-            atomic_set_int32(&session->connection_status_reason, rc);
-            sm->state = SESSION_CLOSE_SOCKET;
-        } else {
-            sm->retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-            sm->state = SESSION_IDLE;
-        }
-        socket_wake(session->sock);
-        break;
-
-                    case SESSION_IDLE:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_UP, PLCTAG_STATUS_OK);
-
-            /*
-             * Reaching idle is the only thing that counts as a successful connect, so it is the only
-             * place the backoff restarts and a refusal is forgotten.
-             */
-            backoff_reset(&sm->retry_backoff);
-            critical_block(&session->session_mutex) { session->refused_rc = PLCTAG_STATUS_OK; }
-
-            /* make sure that our timeout period has not changed */
-            if(sm->inactivity_timeout_ms != atomic_get_int32(&session->connection_inactivity_timeout_ms)) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                       "Inactivity timeout changed from %" PRId32 "ms to %" PRId32 "ms, updating auto disconnect time.",
-                       sm->inactivity_timeout_ms, atomic_get_int32(&session->connection_inactivity_timeout_ms));
-                sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-            }
-
-            /* if there is work to do, make sure we do not disconnect. */
-            critical_block(&session->session_mutex) {
-                int num_reqs = vector_length(session->requests);
-                if(num_reqs > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are %d requests pending before cleanup and sending.", num_reqs);
-                    sm->inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
-                    sm->auto_disconnect_time = sm->now + sm->inactivity_timeout_ms;
-                }
-            }
-
-            /* a batch in flight: nothing else to decide until it is done. */
-            if((rc = requests_step(session, sm)) == PLCTAG_STATUS_PENDING) { break; }
-
-            if(rc != PLCTAG_STATUS_OK) {
-                atomic_set_int32(&session->connection_status_reason, rc);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while processing requests %s!",
-                       plc_tag_decode_error(rc));
-                sm->state = SESSION_UNREGISTER;
-
-                socket_wake(session->sock);
-            }
-
-            /* check if we should disconnect */
-            if(sm->auto_disconnect_time < sm->now) {
-                atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Disconnecting due to inactivity.");
-
-                sm->auto_disconnect = 1;
-
-                sm->state = SESSION_UNREGISTER;
-                socket_wake(session->sock);
-            }
-
-            /* if there is work to do, make sure we wake the handler. */
-            critical_block(&session->session_mutex) {
-                int num_reqs = vector_length(session->requests);
-                if(num_reqs > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are %d requests still pending after abort purge and sending.", num_reqs);
-                    socket_wake(session->sock);
-                }
-            }
-
-            break;
-
-            case SESSION_UNREGISTER:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_UNREGISTER state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if((rc = session_unregister(session, &sm->ex)) == PLCTAG_STATUS_PENDING) { break; }
-
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unregistering session failed %s!", plc_tag_decode_error(rc));
-            }
-
-            sm->state = SESSION_CLOSE_SOCKET;
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_CLOSE_SOCKET:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_CLOSE_SOCKET state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_DOWN,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if((rc = session_close_socket(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Closing session socket failed %s!", plc_tag_decode_error(rc));
-            }
-
-            if(session_refused(session)) {
-                /* a refusal waits the longest before asking again. */
-                backoff_saturate(&sm->retry_backoff);
-                sm->state = SESSION_START_RETRY;
-            } else if(sm->auto_disconnect) {
-                sm->state = SESSION_WAIT_IDLE_RECONNECT;
-            } else {
-                sm->state = SESSION_START_RETRY;
-            }
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_START_RETRY:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_START_RETRY state.");
-
-            /* the cap is a live attribute, so it is read on every retry. */
-            backoff_set_max_ms(&sm->retry_backoff, atomic_get_int32(&session->connection_retry_max_delay_ms));
-            sm->retry_wait_ms = backoff_wait_ms(&sm->retry_backoff);
-            sm->timeout_time = sm->now + sm->retry_wait_ms;
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.",
-                   sm->retry_backoff.attempts, sm->retry_wait_ms);
-
-            /* tags waiting on a refused session get the refusal, not the wait. */
-            if(session_refused(session)) { fail_queued_requests(session); }
-
-            /* start waiting. */
-            sm->state = SESSION_WAIT_ERR_RETRY;
-
-            socket_wake(session->sock);
-            break;
-
-        case SESSION_WAIT_ERR_RETRY:
-            /* a tag created during the wait after a refusal gets the refusal at once. */
-            if(session_refused(session)) { fail_queued_requests(session); }
-
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_WAIT_ERR_RETRY state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_ERR_WAIT,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            if(sm->timeout_time < sm->now) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Transitioning to SESSION_OPEN_SOCKET_START.");
-                sm->state = SESSION_OPEN_SOCKET_START;
-                socket_wake(session->sock);
-            } else {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Wait not complete, still %dms to go.",
-                       (int)(sm->timeout_time - sm->now));
-            }
-
-            break;
-
-        case SESSION_WAIT_IDLE_RECONNECT:
-            /* wait for at least one request to queue before reconnecting. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_WAIT_IDLE_RECONNECT state.");
-            session_set_connection_status(session, PLCTAG_CONN_STATUS_IDLE_WAIT,
-                                          atomic_get_int32(&session->connection_status_reason));
-
-            sm->auto_disconnect = 0;
-
-            /* if there is work to do, reconnect.. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Critical block.");
-            critical_block(&session->session_mutex) {
-                if(vector_length(session->requests) > 0) {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                           "There are requests waiting, reopening connection to PLC.");
-
-                    sm->state = SESSION_OPEN_SOCKET_START;
-                    socket_wake(session->sock);
-                }
-            }
-
-            break;
-
-
-
-        default:
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unknown state %d!", sm->state);
-
-            /* FIXME - this logic is not complete.  We might be here without
-             * a connected session or a registered session. */
-
-            atomic_set_int32(&session->connection_status_reason, PLCTAG_ERR_UNSUPPORTED);
-            sm->state = SESSION_UNREGISTER;
-
-            socket_wake(session->sock);
-            break;
+        default: common_step(session, sm); break;
     }
 }
 
 
 THREAD_FUNC(session_handler) {
     cip_conn_p session = arg;
-    session_sm_t sm = {.state = SESSION_OPEN_SOCKET_START};
+    session_sm_t sm = {.state = SESSION_OPEN_SOCKET};
     int64_t wait_until_time = 0;
 
     sm.inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
@@ -2514,13 +1896,17 @@ THREAD_FUNC(session_handler) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, 0, "Critical block.");
         critical_block(&session->session_mutex) { purge_aborted_requests_unsafe(session); }
 
-        session->step(session, &sm);
+        {
+            session_state_t prev_state = sm.state;
+            cip_conn_step_func prev_step = session->step;
 
-        /*
-         * give up the CPU a bit, but only if we are not
-         * doing some linked states.
-         */
-        if(wait_until_time > 0) {
+            session->step(session, &sm);
+
+            /* a new state runs at once. */
+            if(sm.state != prev_state || session->step != prev_step) { continue; }
+        }
+
+        {
             int64_t time_left = 0;
 
             /* an exchange in flight waits on the socket, up to its deadline. */
@@ -3381,35 +2767,6 @@ int send_some(cip_conn_p session, int timeout_ms) {
 }
 
 
-int send_eip_request(cip_conn_p session, int timeout) {
-    int rc = PLCTAG_STATUS_OK;
-    int64_t timeout_time = (timeout > 0) ? time_ms() + timeout : INT64_MAX;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    if(!session) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session pointer is null.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if((rc = send_begin(session)) != PLCTAG_STATUS_OK) { return rc; }
-
-    do {
-        rc = send_some(session, SOCKET_WAIT_TIMEOUT_MS);
-    } while(rc == PLCTAG_STATUS_PENDING && !atomic_get_int32(&session->terminating) && timeout_time > time_ms());
-
-    if(rc == PLCTAG_STATUS_PENDING) {
-        rc = atomic_get_int32(&session->terminating) ? PLCTAG_ERR_ABORT : PLCTAG_ERR_TIMEOUT;
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Send stopped %s!", plc_tag_decode_error(rc));
-        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, rc, rc);
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return rc;
-}
-
-
 /*
  * Get ready to read a reply.
  *
@@ -3551,45 +2908,12 @@ int recv_finish(cip_conn_p session) {
 }
 
 
-int recv_eip_response(cip_conn_p session, int timeout) {
-    int rc = PLCTAG_STATUS_OK;
-    int64_t timeout_time = (timeout > 0) ? time_ms() + timeout : INT64_MAX;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    if(!session) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Called with null session!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    recv_begin(session);
-
-    do {
-        rc = recv_some(session, SOCKET_WAIT_TIMEOUT_MS);
-    } while(rc == PLCTAG_STATUS_PENDING && !atomic_get_int32(&session->terminating) && timeout_time > time_ms());
-
-    if(rc == PLCTAG_STATUS_PENDING) {
-        rc = atomic_get_int32(&session->terminating) ? PLCTAG_ERR_ABORT : PLCTAG_ERR_TIMEOUT;
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Receive stopped %s!", plc_tag_decode_error(rc));
-        session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, rc, rc);
-        return rc;
-    }
-
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
-    rc = recv_finish(session);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return rc;
-}
-
-
 /* start an exchange of the packet in session->data. */
 void exchange_start(cip_conn_p session, exchange_t *ex, bool want_reply) {
     ex->want_reply = want_reply;
     ex->deadline = time_ms() + SESSION_DEFAULT_TIMEOUT;
     ex->rc = send_begin(session);
+    ex->net_error = false;
     ex->state = EX_SEND;
 }
 
@@ -3619,6 +2943,8 @@ ex_result_t exchange_step(cip_conn_p session, exchange_t *ex) {
         if(rc == PLCTAG_STATUS_OK) {
             ex->state = EX_IDLE;
             ex->rc = recv_finish(session);
+            /* a reply to something else means the stream is out of step: as bad as a broken socket. */
+            ex->net_error = (ex->rc != PLCTAG_STATUS_OK && ex->rc != PLCTAG_ERR_BAD_STATUS);
             return (ex->rc == PLCTAG_STATUS_OK) ? EX_DONE : EX_FAILED;
         }
     }
@@ -3634,6 +2960,8 @@ ex_result_t exchange_step(cip_conn_p session, exchange_t *ex) {
 
     if(rc == PLCTAG_STATUS_PENDING) { return EX_PENDING; }
 
+    /* a packet we could not build never reached the wire. */
+    ex->net_error = (ex->rc == PLCTAG_STATUS_OK);
     ex->state = EX_IDLE;
     ex->rc = rc;
 
@@ -3648,31 +2976,6 @@ int exchange_wait_events(const exchange_t *ex) {
         case EX_READ: return SOCK_EVENT_CAN_READ;
         default: return SOCK_EVENT_NONE;
     }
-}
-
-
-int perform_forward_close(cip_conn_p session) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    do {
-        rc = send_forward_close_req(session);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Sending forward close failed, %s!", plc_tag_decode_error(rc));
-            break;
-        }
-
-        rc = recv_forward_close_resp(session);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward close response not received, %s!", plc_tag_decode_error(rc));
-            break;
-        }
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return rc;
 }
 
 
@@ -3862,10 +3165,52 @@ void encode_large_forward_open(cip_conn_p session) {
 }
 
 
-int send_forward_close_req(cip_conn_p session) {
+/*
+ * Close the CIP connection.  PLCTAG_STATUS_PENDING until the reply is in; call again on each
+ * pass.  Teardown goes on whatever this returns.
+ */
+int session_forward_close(cip_conn_p session, exchange_t *ex) {
     eip_forward_close_req_t *fc;
+    eip_forward_close_resp_t *fo_resp;
     uint8_t *data;
-    int rc = PLCTAG_STATUS_OK;
+
+    if(ex->state != EX_IDLE) {
+        switch(exchange_step(session, ex)) {
+            case EX_PENDING: return PLCTAG_STATUS_PENDING;
+            case EX_FAILED:
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Close exchange failed %s!", plc_tag_decode_error(ex->rc));
+                session->targ_connection_id = 0;
+                return ex->rc;
+            case EX_DONE: break;
+        }
+
+        session->targ_connection_id = 0;
+        fo_resp = (eip_forward_close_resp_t *)(session->data);
+
+        /*
+         * As in the Forward Open case, we only know we got an EIP header so far.  We read
+         * no further than general_status here, so the CIP reply status prefix is enough.
+         */
+        if((size_t)session->data_size < offsetof(eip_forward_close_resp_t, conn_serial_number)) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "Forward Close response of %u bytes is too short to hold the CIP reply status at %d bytes!",
+                   session->data_size, (int)offsetof(eip_forward_close_resp_t, conn_serial_number));
+            return PLCTAG_ERR_TOO_SMALL;
+        }
+
+        if(fo_resp->general_status != AB_EIP_OK) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Close command failed, response code: %d",
+                   fo_resp->general_status);
+            return PLCTAG_ERR_REMOTE_ERR;
+        }
+
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Connection close succeeded.");
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* no connection, nothing to close. */
+    if(!session->targ_connection_id) { return PLCTAG_STATUS_OK; }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting");
 
@@ -3919,68 +3264,9 @@ int send_forward_close_req(cip_conn_p session) {
     /* set the size of the request */
     session->data_size = (uint32_t)(data - (session->data));
 
-    rc = send_eip_request(session, 100);
+    exchange_start(session, ex, true);
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done");
-
-    return rc;
-}
-
-
-int recv_forward_close_resp(cip_conn_p session) {
-    eip_forward_close_resp_t *fo_resp;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting");
-
-    rc = recv_eip_response(session, 150);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to receive Forward Close response, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    fo_resp = (eip_forward_close_resp_t *)(session->data);
-
-    do {
-        /*
-         * As in the Forward Open case, we only know we got an EIP header so far.  We read
-         * no further than general_status here, so the CIP reply status prefix is enough.
-         */
-        if((size_t)session->data_size < offsetof(eip_forward_close_resp_t, conn_serial_number)) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                   "Forward Close response of %u bytes is too short to hold the CIP reply status at %d bytes!",
-                   session->data_size, (int)offsetof(eip_forward_close_resp_t, conn_serial_number));
-            rc = PLCTAG_ERR_TOO_SMALL;
-            break;
-        }
-
-        if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        if(fo_resp->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Close command failed, response code: %d",
-                   fo_resp->general_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Connection close succeeded.");
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return rc;
+    return PLCTAG_STATUS_PENDING;
 }
 
 
@@ -4002,7 +3288,7 @@ plc_type_t session_plc_type(cip_conn_p session, int32_t *refused_rc) {
  * returned to be retried like any connect failure.  An answer is final: a CIP error or a device
  * the classifier refuses is kept in refused_rc so the waiting tags fail with it.
  */
-int session_identify(cip_conn_p session) {
+int session_identify(cip_conn_p session, exchange_t *ex) {
     static uint8_t get_identity[] = {0x01, 0x02, 0x20, 0x01, 0x24, 0x01}; /* Get_Attributes_All, Identity, 1 */
     uint8_t *reply = NULL;
     size_t reply_offset = 0;
@@ -4015,21 +3301,27 @@ int session_identify(cip_conn_p session) {
     const cip_plc_type_t *plc = NULL;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
+    if(ex->state == EX_IDLE) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
-    mem_copy(session->data + frame_header_size(session, false), get_identity, (int)sizeof(get_identity));
+        mem_copy(session->data + frame_header_size(session, false), get_identity, (int)sizeof(get_identity));
 
-    rc = frame_cip_request(session, false, sizeof(get_identity));
-    if(rc == PLCTAG_STATUS_OK) { rc = prepare_request(session); }
-    if(rc == PLCTAG_STATUS_OK) {
-        session->data_offset = 0;
-        rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
+        rc = frame_cip_request(session, false, sizeof(get_identity));
+        if(rc == PLCTAG_STATUS_OK) { rc = prepare_request(session); }
+        if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+        exchange_start(session, ex, true);
+
+        return PLCTAG_STATUS_PENDING;
     }
-    if(rc == PLCTAG_STATUS_OK) { rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT); }
 
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to exchange the Identity request, %s!", plc_tag_decode_error(rc));
-        return rc;
+    switch(exchange_step(session, ex)) {
+        case EX_PENDING: return PLCTAG_STATUS_PENDING;
+        case EX_FAILED:
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to exchange the Identity request, %s!",
+                   plc_tag_decode_error(ex->rc));
+            return ex->rc;
+        case EX_DONE: break;
     }
 
     do {

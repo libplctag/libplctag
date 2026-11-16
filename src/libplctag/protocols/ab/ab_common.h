@@ -116,9 +116,6 @@ typedef struct cip_plc_type_t {
     bool needs_path;
     bool fragmented; /* has Read and Write Tag Fragmented (0x52, 0x53). */
 
-    /* installs this type's connection state machine once the type is known. */
-    void (*setup_conn)(cip_conn_p conn);
-
     /* the PLC-specific half of creating a tag.  from_src is set by plc_tag_create_from_tag(). */
     int (*tag_create)(ab_tag_p tag, attr attribs, bool from_src);
 } cip_plc_type_t;

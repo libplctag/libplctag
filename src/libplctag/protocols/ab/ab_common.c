@@ -200,26 +200,26 @@ static const char *const generic_aliases[] = {"generic", "cip", NULL};
 /* The first alias is how the plc attribute reads back. */
 static const cip_plc_type_t plc_types[] = {
     {.id = AB_PLC_PLC5, .name = "PLC/5", .aliases = plc5_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
-     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .setup_conn = session_setup_pccc, .tag_create = pccc_plc_tag_create},
+     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_SLC, .name = "SLC 500", .aliases = slc_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
-     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .setup_conn = session_setup_pccc, .tag_create = pccc_plc_tag_create},
+     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_MLGX, .name = "MicroLogix", .aliases = mlgx_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
-     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .setup_conn = session_setup_pccc, .tag_create = pccc_plc_tag_create},
+     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_LGX_PCCC, .name = "Logix PCCC", .aliases = lgx_pccc_aliases, .max_msg_size = MAX_CIP_PCCC_MSG_SIZE,
-     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .setup_conn = session_setup_pccc, .tag_create = pccc_plc_tag_create},
+     .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .tag_create = pccc_plc_tag_create},
     {.id = AB_PLC_MICRO800, .name = "Micro800", .aliases = micro800_aliases, .max_msg_size = MAX_CIP_MICRO800_MSG_SIZE_EX,
-     .fo_conn_size = MAX_CIP_MICRO800_MSG_SIZE, .connected = 1, .fragmented = true, .setup_conn = session_setup_generic, .tag_create = cip_plc_tag_create},
+     .fo_conn_size = MAX_CIP_MICRO800_MSG_SIZE, .connected = 1, .fragmented = true, .tag_create = cip_plc_tag_create},
     {.id = AB_PLC_LGX, .name = "Logix", .aliases = lgx_aliases, .max_msg_size = MAX_CIP_LGX_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_LGX_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .connected = -1,
-     .allow_packing = true, .needs_path = true, .fragmented = true, .setup_conn = session_setup_logix,
+     .allow_packing = true, .needs_path = true, .fragmented = true,
      .tag_create = cip_plc_tag_create},
     /* Omron packs only requests whose reply size is known; see ab_request_t's reply_size. */
     {.id = AB_PLC_OMRON_NJNX, .name = "Omron NJ/NX", .aliases = omron_aliases, .max_msg_size = MAX_CIP_OMRON_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .connected = -1, .allow_packing = true,
-     .needs_path = true, .setup_conn = session_setup_generic, .tag_create = cip_plc_tag_create},
+     .needs_path = true, .tag_create = cip_plc_tag_create},
     {.id = AB_PLC_GENERIC, .name = "generic CIP", .aliases = generic_aliases, .max_msg_size = MAX_CIP_LGX_MSG_SIZE_EX,
      .fo_conn_size = MAX_CIP_LGX_MSG_SIZE, .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .fragmented = true,
-     .setup_conn = session_setup_generic, .tag_create = generic_plc_tag_create},
+     .tag_create = generic_plc_tag_create},
 };
 
 

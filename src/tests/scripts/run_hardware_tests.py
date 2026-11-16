@@ -662,6 +662,13 @@ def build_logix_matrix() -> list[Test]:
         tests.append(test(f"{target.label}: raw cip, bundled into one packet",
                           [exe("test_raw_cip"), f"--tag={base}&name=@raw",
                            "--read=TestBigArray", "--count=4"]))
+        # Packing on an unconnected session is new on the wire; allow_packing=0 sends each bare.
+        tests.append(test(f"{target.label}: raw cip, bundled into one packet, unconnected",
+                          [exe("test_raw_cip"), f"--tag={base}&use_connected_msg=0&name=@raw",
+                           "--read=TestBigArray", "--count=4"]))
+        tests.append(test(f"{target.label}: raw cip, four at once sent bare (allow_packing=0)",
+                          [exe("test_raw_cip"), f"--tag={base}&allow_packing=0&name=@raw",
+                           "--read=TestBigArray", "--count=4"]))
 
     return tests
 
