@@ -235,6 +235,8 @@ extern int session_startup(void);
 extern void session_teardown(void);
 
 extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new_session);
+/* true when an identified connection is connected and the tag asks for unconnected, or the reverse. */
+extern bool session_connected_conflicts(cip_conn_p session, int use_connected_msg);
 extern int session_get_max_payload(cip_conn_p session);
 extern int session_get_available_cip_payload_space(cip_conn_p session);
 extern int session_create_request(cip_conn_p session, int tag_id, ab_request_p *request);

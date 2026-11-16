@@ -45,6 +45,10 @@
  * --abort-create-read and --missing-tag check the other side: a create read that ends in
  * an abort or a PLC error fails the create for good.  Status, read and write must all
  * report that error from then on.
+ *
+ * --abort-reread aborts a read in flight and starts the next one at once.  The aborted read
+ * completes once, with ABORT, and the next one completes once, with its own result, never
+ * with PENDING (#687).
  */
 
 #include "compat_utils.h"
@@ -112,6 +116,93 @@ static int32_t create_and_abort(const char *tag_string) {
     printf("ERROR: every create finished before the abort reached it.\n");
 
     return PLCTAG_ERR_TIMEOUT;
+}
+
+
+/* READ_COMPLETED events seen by reread_callback(). */
+static compat_atomic_int32_t read_completions;
+static compat_atomic_int32_t read_completions_pending;
+static compat_atomic_int32_t first_read_status;
+static compat_atomic_int32_t last_read_status;
+
+
+static void reread_callback(int32_t tag_id, int event, int status, void *userdata) {
+    (void)tag_id;
+    (void)userdata;
+
+    if(event != PLCTAG_EVENT_READ_COMPLETED) { return; }
+
+    if(compat_atomic_load_int32(&read_completions) == 0) { compat_atomic_store_int32(&first_read_status, (int32_t)status); }
+    if(status == PLCTAG_STATUS_PENDING) { compat_atomic_store_int32(&read_completions_pending, 1); }
+    compat_atomic_store_int32(&last_read_status, (int32_t)status);
+    compat_atomic_store_int32(&read_completions, compat_atomic_load_int32(&read_completions) + 1);
+}
+
+
+static int abort_then_reread(const char *tag_string) {
+    int32_t tag = 0;
+    int rc = PLCTAG_STATUS_OK;
+    int64_t deadline = 0;
+
+    printf("--- %s\n", tag_string);
+
+    tag = plc_tag_create_ex(tag_string, reread_callback, NULL, DATA_TIMEOUT);
+    if(tag < 0) {
+        printf("ERROR %s: could not create tag!\n", plc_tag_decode_error(tag));
+        return 1;
+    }
+
+    for(int32_t attempt = 0; attempt < ABORT_ATTEMPTS; attempt++) {
+        compat_atomic_store_int32(&read_completions, 0);
+        compat_atomic_store_int32(&read_completions_pending, 0);
+        compat_atomic_store_int32(&first_read_status, PLCTAG_STATUS_PENDING);
+
+        if((rc = plc_tag_read(tag, 0)) != PLCTAG_STATUS_PENDING) {
+            printf("ERROR: the first read returned %s, not PENDING!\n", plc_tag_decode_error(rc));
+            break;
+        }
+
+        plc_tag_abort(tag);
+
+        /* the next read starts before the tickler can run. */
+        if((rc = plc_tag_read(tag, 0)) != PLCTAG_STATUS_PENDING) {
+            printf("ERROR: the read after the abort returned %s, not PENDING!\n", plc_tag_decode_error(rc));
+            break;
+        }
+
+        deadline = compat_time_ms() + DATA_TIMEOUT;
+        while((rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING && compat_time_ms() < deadline) { compat_sleep_ms(10, NULL); }
+
+        /* a fast PLC can finish the first read before the abort; that attempt proves nothing. */
+        if(compat_atomic_load_int32(&first_read_status) == PLCTAG_STATUS_OK) {
+            printf("The first read finished before the abort reached it; trying again.\n");
+            continue;
+        }
+
+        if(compat_atomic_load_int32(&read_completions_pending)) {
+            printf("ERROR: a read completed with status PENDING!\n");
+            rc = PLCTAG_ERR_BAD_STATUS;
+        } else if(rc != PLCTAG_STATUS_OK) {
+            printf("ERROR: the read after the abort ended with %s!\n", plc_tag_decode_error(rc));
+        } else if(compat_atomic_load_int32(&read_completions) != 2
+                  || compat_atomic_load_int32(&last_read_status) != PLCTAG_STATUS_OK) {
+            printf("ERROR: %d read completions, the last with %s; expected ABORT then OK!\n",
+                   compat_atomic_load_int32(&read_completions),
+                   plc_tag_decode_error(compat_atomic_load_int32(&last_read_status)));
+            rc = PLCTAG_ERR_BAD_STATUS;
+        } else {
+            printf("The aborted read completed once with ABORT and the next once with OK.\n");
+        }
+
+        plc_tag_destroy(tag);
+        return rc == PLCTAG_STATUS_OK ? 0 : 1;
+    }
+
+    if(rc == PLCTAG_STATUS_OK) { printf("ERROR: every read finished before the abort reached it.\n"); }
+
+    plc_tag_destroy(tag);
+
+    return 1;
 }
 
 
@@ -270,9 +361,10 @@ static int create_fails_for_good(const char *tag_string, bool abort_create_read)
 
 
 static void usage(void) {
-    printf("Usage: test_write_before_read [--abort-create-read | --missing-tag] --tag=<attribute string> [--tag=...]\n");
+    printf("Usage: test_write_before_read [--abort-create-read | --missing-tag | --abort-reread] --tag=<attribute string> [--tag=...]\n");
     printf("  Each tag is created asynchronously and written before it has ever been read.\n");
     printf("  --abort-create-read aborts the create's read; the create must fail with ABORT for good.\n");
+    printf("  --abort-reread aborts a read in flight and reads again; each read completes once, never PENDING.\n");
     printf("  --missing-tag expects tags the PLC does not have; the create must fail with its error for good.\n");
 }
 
@@ -285,6 +377,7 @@ int main(int argc, char **argv) {
     int tags_run = 0;
     bool abort_create_read = false;
     bool missing_tag = false;
+    bool abort_reread = false;
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
@@ -301,6 +394,11 @@ int main(int argc, char **argv) {
             abort_create_read = true;
         } else if(strcmp(argv[i], "--missing-tag") == 0) {
             missing_tag = true;
+        } else if(strcmp(argv[i], "--abort-reread") == 0) {
+            abort_reread = true;
+        } else if(strncmp(argv[i], "--tag=", 6) == 0 && abort_reread) {
+            failures += abort_then_reread(argv[i] + 6);
+            tags_run++;
         } else if(strncmp(argv[i], "--tag=", 6) == 0 && (abort_create_read || missing_tag)) {
             failures += create_fails_for_good(argv[i] + 6, abort_create_read);
             tags_run++;

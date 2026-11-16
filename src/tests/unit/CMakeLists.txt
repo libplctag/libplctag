@@ -82,6 +82,31 @@ target_include_directories(test_tag_name_bounds PRIVATE
 
 target_link_libraries(test_tag_name_bounds PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_pccc_address: PCCC logical address parsing, named fields included (#688).
+add_executable(test_pccc_address test_pccc_address.c)
+
+target_include_directories(test_pccc_address PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_pccc_address PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+# test_tag_id_wrap: tag ID assignment after the counter wraps onto live tags (#681).
+# Compiles lib.c in to set next_tag_id by hand.
+add_executable(test_tag_id_wrap test_tag_id_wrap.c)
+
+target_include_directories(test_tag_id_wrap PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_tag_id_wrap PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_backoff: tests the shared connection retry backoff. Pure computation -- no socket,
 # no PLC, no threads -- so it runs anywhere and in milliseconds. It is also the UB check
 # for the retry path: the sanitizer build traps a bad shift inside backoff_wait_ms().
@@ -266,6 +291,8 @@ endif()
 # add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
+add_test(NAME unit_test_pccc_address COMMAND test_pccc_address)
+add_test(NAME unit_test_tag_id_wrap COMMAND test_tag_id_wrap)
 # add_test(NAME unit_test_backoff COMMAND test_backoff)
 add_test(NAME unit_test_byte_slice COMMAND test_byte_slice)
 add_test(NAME unit_test_byte_buffer COMMAND test_byte_buffer)

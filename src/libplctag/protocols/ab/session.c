@@ -159,6 +159,7 @@ static void session_destroy(void *session);
 static int session_register(cip_conn_p session, exchange_t *ex);
 static int session_identify(cip_conn_p session, exchange_t *ex);
 static int session_close_socket(cip_conn_p session);
+static void session_say_goodbye(cip_conn_p session);
 static int session_unregister(cip_conn_p session, exchange_t *ex);
 static THREAD_FUNC(session_handler);
 static int purge_aborted_requests_unsafe(cip_conn_p session);
@@ -396,9 +397,9 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
-    int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
-    // int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
     const cip_plc_type_t *plc = ab_plc_type_find(attribs);
+    /* data tags set it; an @connection tag gets the same default, so their connections match. */
+    int use_connected_msg = attr_get_int(attribs, "use_connected_msg", !plc ? 0 : (plc->connected < 0) ? 1 : plc->connected);
     cip_conn_p session = CIP_CONN_NULL;
     int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
@@ -474,6 +475,13 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
 
                 new_session = 1;
             }
+        } else if(plc && session_connected_conflicts(session, use_connected_msg)) {
+            /* a connection is either connected or not; a tag asking for the other cannot share it. */
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "use_connected_msg=%d conflicts with the connection's %d!",
+                   use_connected_msg, session->use_connected_msg);
+            rc_dec(session);
+            session = CIP_CONN_NULL;
+            rc = PLCTAG_ERR_BAD_PARAM;
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Reusing existing session.");
         }
@@ -507,6 +515,17 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done");
 
     return rc;
+}
+
+
+bool session_connected_conflicts(cip_conn_p session, int use_connected_msg) {
+    bool conflicts = false;
+
+    critical_block(&session->session_mutex) {
+        conflicts = session->plc_type != AB_PLC_NONE && (use_connected_msg != 0) != (session->use_connected_msg != 0);
+    }
+
+    return conflicts;
 }
 
 
@@ -1014,6 +1033,33 @@ int session_unregister(cip_conn_p session, exchange_t *ex) {
 }
 
 
+/*
+ * Forward Close and unregister, then close the socket.  The exchange deadline bounds each step.
+ * The handler does this as it stops, so a shutdown closes every connection in parallel; the
+ * destructor calls it again, which then does nothing.  Caller holds the session mutex.
+ */
+void session_say_goodbye(cip_conn_p session) {
+    exchange_t ex = {.state = EX_IDLE};
+
+    if(!session->sock) { return; }
+
+    while(session_forward_close(session, &ex) == PLCTAG_STATUS_PENDING) {
+        socket_wait_event(session->sock, SOCK_EVENT_TIMEOUT | exchange_wait_events(&ex), SOCKET_WAIT_TIMEOUT_MS);
+    }
+
+    /* a network error is fatal: nothing more can be said on this socket. */
+    while(!ex.net_error && session_unregister(session, &ex) == PLCTAG_STATUS_PENDING) {
+        socket_wait_event(session->sock, SOCK_EVENT_TIMEOUT | exchange_wait_events(&ex), SOCKET_WAIT_TIMEOUT_MS);
+    }
+
+    /* whatever the PLC heard, nothing more is owed on this socket. */
+    session->targ_connection_id = 0;
+    session->session_handle = 0;
+
+    session_close_socket(session);
+}
+
+
 int session_close_socket(cip_conn_p session) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
@@ -1063,21 +1109,8 @@ void session_destroy(void *session_arg) {
 
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
     critical_block(&session->session_mutex) {
-        /* be nice: close the connection and unregister.  The exchange deadline bounds each. */
-        if(session->sock) {
-            exchange_t ex = {.state = EX_IDLE};
-
-            while(session_forward_close(session, &ex) == PLCTAG_STATUS_PENDING) {
-                socket_wait_event(session->sock, SOCK_EVENT_TIMEOUT | exchange_wait_events(&ex), SOCKET_WAIT_TIMEOUT_MS);
-            }
-
-            /* a network error is fatal: nothing more can be said on this socket. */
-            while(!ex.net_error && session_unregister(session, &ex) == PLCTAG_STATUS_PENDING) {
-                socket_wait_event(session->sock, SOCK_EVENT_TIMEOUT | exchange_wait_events(&ex), SOCKET_WAIT_TIMEOUT_MS);
-            }
-        }
-
-        if(session->sock) { session_close_socket(session); }
+        /* the handler has normally said goodbye already; this covers one that never ran. */
+        session_say_goodbye(session);
 
         /* release all the requests that are in the queue. */
         if(session->requests) {
@@ -1205,6 +1238,7 @@ typedef struct session_sm_s {
     int32_t inactivity_timeout_ms;
     backoff_t retry_backoff;
     bool auto_disconnect;
+    bool peer_closed;  /* the PLC closed the socket while nothing was in flight */
     exchange_t ex; /* the exchange in flight, if any */
     fo_neg_t fo;   /* the Forward Open negotiation */
     req_batch_t batch; /* the requests in flight */
@@ -1669,6 +1703,13 @@ static phase_t idle_phase(cip_conn_p session, session_sm_t *sm) {
         return failure(sm);
     }
 
+    if(sm->peer_closed) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "The PLC closed the idle connection.");
+        sm->peer_closed = false;
+        atomic_set_int32(&session->connection_status_reason, PLCTAG_ERR_READ);
+        return PHASE_NET_ERROR;
+    }
+
     if(sm->auto_disconnect_time < sm->now) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Disconnecting due to inactivity.");
         atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
@@ -1915,16 +1956,27 @@ THREAD_FUNC(session_handler) {
             time_left = wait_until_time - sm.now;
 
             if(time_left > 0) {
+                /* idle with nothing in flight: only watching the socket shows the PLC closing it. */
+                bool idle = (sm.state == SESSION_IDLE && sm.ex.state == EX_IDLE);
+                int events = 0;
+
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Waiting up to %" PRId64 "ms for something to happen.",
                        time_left);
-                socket_wait_event(session->sock, SOCK_EVENT_WAKE_UP | SOCK_EVENT_TIMEOUT | exchange_wait_events(&sm.ex),
-                                  (int)time_left);
+                events = socket_wait_event(session->sock,
+                                           SOCK_EVENT_WAKE_UP | SOCK_EVENT_TIMEOUT | exchange_wait_events(&sm.ex)
+                                               | (idle ? SOCK_EVENT_DISCONNECT : 0),
+                                           (int)time_left);
+
+                if(idle && events > 0 && (events & SOCK_EVENT_DISCONNECT)) { sm.peer_closed = true; }
             }
         }
     }
 
     /* a batch in flight goes back on the queue, where the destructor releases it. */
     requeue_batch(session, &sm.batch);
+
+    /* each handler says its own goodbye, so a shutdown closes every connection at once. */
+    critical_block(&session->session_mutex) { session_say_goodbye(session); }
 
     /*
      * One last time before we exit.

@@ -61,8 +61,6 @@
 
 #define TAG_ID_MASK (0xFFFFFFF)
 
-#define MAX_TAG_MAP_ATTEMPTS (50)
-
 /* these are only internal to the file */
 
 /* next_tag_id deliberately lives outside lib_instance_t and is never reset by
@@ -83,6 +81,8 @@ struct lib_instance_t {
     mutex_t tag_lookup_mutex;
     cond_p tag_tickler_wait;
     thread_p tag_tickler_thread;
+    /* set by shutdown before its sweep; a create that finishes later cannot publish.  Under tag_lookup_mutex. */
+    bool closing;
 };
 
 /* Guards current_instance and building_instance/shutting_down_instance below. Must
@@ -755,6 +755,7 @@ THREAD_FUNC(tag_tickler_func) {
                     tag->read_in_flight = 0;
                     tag->reads_done++;
                     tag->last_read_rc = tag->status;
+                    if(tag->status == PLCTAG_STATUS_OK) { tag->read_cache_expire = time_ms() + tag->read_cache_ms; }
 
                     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
 
@@ -883,28 +884,23 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
              * abort function may modify these flags. We need to know what
              * was in flight at the time of the abort.
              *
-             * If a read was in flight, we need to signal completion with abort status
-             * so that any waiting thread (e.g. plc_tag_read with timeout) wakes up.
-             *
-             * If no operation was in flight, just clear the flags.
+             * An aborted operation is finished here.  The complete flags are cleared, not
+             * set: a set flag outlives the abort and "completes" the next operation the
+             * moment it starts (#687).  A blocking read waits on reads_done, a blocking
+             * write on the status, so both wake on the signal below.
              */
             if(tag->read_in_flight) {
-                tag->read_in_flight = 0;
-                tag->read_complete = 1;
+                tag->reads_done++;
+                tag->last_read_rc = PLCTAG_ERR_ABORT;
                 tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_ERR_ABORT);
-            } else {
-                tag->read_in_flight = 0;
-                tag->read_complete = 0;
             }
 
-            if(tag->write_in_flight) {
-                tag->write_in_flight = 0;
-                tag->write_complete = 1;
-                tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_ERR_ABORT);
-            } else {
-                tag->write_in_flight = 0;
-                tag->write_complete = 0;
-            }
+            if(tag->write_in_flight) { tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_ERR_ABORT); }
+
+            tag->read_in_flight = 0;
+            tag->read_complete = 0;
+            tag->write_in_flight = 0;
+            tag->write_complete = 0;
 
             /* Call protocol-specific abort to clean up protocol state */
             if(tag->vtable && tag->vtable->abort) {
@@ -952,6 +948,7 @@ static int plc_tag_status_impl(plc_tag_p tag) {
         if(tag->read_complete) {
             tag->read_complete = 0;
             tag->read_in_flight = 0;
+            if(tag->status == PLCTAG_STATUS_OK) { tag->read_cache_expire = time_ms() + tag->read_cache_ms; }
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
             tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
             cond_signal(tag->tag_cond_wait);
@@ -1553,7 +1550,11 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     /* close all tags. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Closing all tags.");
 
-    critical_block(&inst->tag_lookup_mutex) { tag_table_entries = hashtable_capacity(inst->tags); }
+    /* a create that passed the gate before it closed must not publish behind the sweep. */
+    critical_block(&inst->tag_lookup_mutex) {
+        inst->closing = true;
+        tag_table_entries = hashtable_capacity(inst->tags);
+    }
 
     for(int i = 0; i < tag_table_entries; i++) {
         plc_tag_p tag = NULL;
@@ -2099,6 +2100,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
 LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
     uint32_t reads_done_before = 0;
     bool own_read_done = false;
+    bool cache_hit = false;
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
     int is_done = 0;
@@ -2131,6 +2133,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             plc_tag_generic_handle_event_callbacks(tag);
 
             rc = PLCTAG_STATUS_OK;
+            cache_hit = true;
             is_done = 1;
             break;
         }
@@ -2290,9 +2293,13 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "elapsed time %" PRId64 "ms", (time_ms() - start_time));
     }
 
-    if(rc == PLCTAG_STATUS_OK) {
-        /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
-        tag->read_cache_expire = time_ms() + tag->read_cache_ms;
+    /*
+     * The window starts when data arrives from the PLC, never on a cache hit, or a tag read
+     * more often than read_cache_ms would never be read again (#683).  Async completions set
+     * it where they finish the read.  Zero read_cache_ms leaves it already expired.
+     */
+    if(rc == PLCTAG_STATUS_OK && !cache_hit) {
+        critical_block(&tag->api_mutex) { tag->read_cache_expire = time_ms() + tag->read_cache_ms; }
     }
 
     /* fire any events that are pending. */
@@ -4681,6 +4688,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
     if(attr_get_str(attribs, "str_pad_to_multiple_bytes_EXPERIMENTAL", NULL) != NULL) { use_default = 0; }
 
+    if(attr_get_str(attribs, "write_pad_alignment_bytes", NULL) != NULL) { use_default = 0; }
+
     /* if we need to override something, build a new byte order structure. */
     if(!use_default) {
         const char *byte_order_str = NULL;
@@ -4921,8 +4930,11 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
         /* Should we pad the string to a multiple of 1 (no padding), 2, or 4 bytes. Adding padding causes issues when writing
            OmronNJ strings, 2 byte padding is required for certain AB PLCs*/
-        if(attr_get_str(attribs, "str_pad_to_multiple_bytes_EXPERIMENTAL", NULL)) {
-            str_param = attr_get_int(attribs, "str_pad_to_multiple_bytes_EXPERIMENTAL", 0);
+        /* write_pad_alignment_bytes is the name now; the experimental one still works. */
+        const char *pad_attr = attr_get_str(attribs, "write_pad_alignment_bytes", NULL) ? "write_pad_alignment_bytes"
+                                                                                        : "str_pad_to_multiple_bytes_EXPERIMENTAL";
+        if(attr_get_str(attribs, pad_attr, NULL)) {
+            str_param = attr_get_int(attribs, pad_attr, 0);
             if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4) {
                 if(str_param == 0) {
                     str_param = 1;
@@ -4930,7 +4942,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
                 tag->byte_order->str_pad_to_multiple_bytes = (unsigned int)str_param;
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
-                       "Tag string attribute str_pad_to_multiple_bytes must be missing, 1, 2 or 4!");
+                       "Tag string attribute %s must be missing, 1, 2 or 4!", pad_attr);
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -5094,6 +5106,13 @@ int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
 
     critical_block(&tag->instance->tag_lookup_mutex) {
         int attempts = 0;
+        int32_t max_attempts = 0;
+
+        if(tag->instance->closing) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "The library is shutting down, the tag cannot be published.");
+            rc = PLCTAG_ERR_NOT_ALLOWED;
+            break;
+        }
 
         if(reuse_str) {
             *existing = find_reusable_unsafe(tag->instance, reuse_str);
@@ -5112,12 +5131,18 @@ int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
         /* only get this when we hold the mutex. */
         new_id = next_tag_id;
 
+        /*
+         * After the counter wraps it lands on IDs long-lived tags still hold.  Live tags never
+         * outnumber the table, so this many IDs in a row always include a free one (#681).
+         */
+        max_attempts = hashtable_capacity(tag->instance->tags) + 1;
+
         do {
             new_id = tag_id_inc(new_id);
 
             if(new_id <= 0) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ID %d is illegal!", new_id);
-                attempts = MAX_TAG_MAP_ATTEMPTS;
+                attempts = max_attempts;
                 break;
             }
 
@@ -5129,9 +5154,9 @@ int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
             }
 
             attempts++;
-        } while(attempts < MAX_TAG_MAP_ATTEMPTS);
+        } while(attempts < max_attempts);
 
-        if(attempts < MAX_TAG_MAP_ATTEMPTS) {
+        if(attempts < max_attempts) {
             /* Set tag->tag_id before the tag is published into the hashtable (in
              * the same tag_lookup_mutex critical section as the hashtable_put()
              * below), not after: any thread that can observe this tag at all had
@@ -5570,6 +5595,14 @@ int32_t create_failed(plc_tag_p tag, int32_t rc) {
 
         /* the vtable abort() expects the caller to hold api_mutex, and takes plc->mutex itself. */
         if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+
+        /*
+         * The app frees userdata once create returns an error.  A thread that still holds the tag
+         * can tickle it and dispatch its events later; dispatch runs callbacks under this mutex
+         * and skips them once the callback is gone, so none can run after this (#684).
+         */
+        tag->callback = NULL;
+        tag->userdata = NULL;
     }
 
     critical_block(&tag->instance->tag_lookup_mutex) { remove_tag_unsafe(tag->instance, (int64_t)tag->tag_id); }

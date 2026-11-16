@@ -38,23 +38,24 @@
  * can free userdata.  The failed tag's events can still be queued on the connection's I/O
  * thread when create returns, behind another tag's callback.
  *
- * The test makes that ordering happen with an auto-sync tag X, whose callbacks run on the
- * I/O thread:
+ * The test makes that ordering happen with an auto-sync tag X.  The tickler thread visits tags
+ * in ID order and runs each tag's callbacks before it moves on, so X, created first, can hold
+ * it in front of B:
  *
- * 1. X's READ_COMPLETED holds the I/O thread for HOLD_MS.  Meanwhile main creates the missing
- *    tag B synchronously, so B's create read is queued, and X's next auto-sync read comes due.
- * 2. The next pass tickles X, which queues X's READ_STARTED for dispatch, then sends B's create
- *    read on its own (create reads never pack) and decodes the error.  B's events are queued
- *    behind X's.
- * 3. X's READ_STARTED callback holds the I/O thread until B's create has returned.
- * 4. Main stamps B's userdata as freed.  When X's callback returns, B's events reach dispatch,
- *    and any call to B's callback is the bug.
+ * 1. X's READ_COMPLETED holds the tickler thread for HOLD_MS.  Meanwhile main creates tag B
+ *    with a timeout of B_TIMEOUT_MS.  B names no PLC type and has its own connection, so it
+ *    waits for identify, and its name is bad, so it fails once identify ends (#684).
+ * 2. The next pass reaches X first; X's READ_STARTED callback holds the thread until B's create
+ *    has timed out and returned.  Identify finishes meanwhile.
+ * 3. Main stamps B's userdata as freed.  When X's callback returns, the pass goes on to B, which
+ *    fails and raises CREATED with the error.  Any call to B's callback is the bug.
  *
  * If X's callback never sees B's create return, the ordering did not happen and the run
  * proves nothing, so it fails as inconclusive.
  *
- * Usage: test_create_fail_callback --tag=<existing tag with auto_sync_read_ms> --missing-tag=<missing tag>
- *        Both tags must use the same connection.  X's auto-sync period must be well under HOLD_MS.
+ * Usage: test_create_fail_callback --tag=<existing tag with auto_sync_read_ms> --failing-tag=<tag>
+ *        The failing tag names no plc, has its own connection_group_id and a bad name.  X's
+ *        auto-sync period must be well under HOLD_MS.
  */
 
 #include "compat_utils.h"
@@ -67,6 +68,7 @@
 #define REQUIRED_VERSION 2, 6, 0
 #define DATA_TIMEOUT (5000)
 #define HOLD_MS (300)
+#define B_TIMEOUT_MS (2 * HOLD_MS) /* ends during X's second hold. */
 #define WAIT_CAP_MS (3000)
 #define USERDATA_LIVE (0x1234)
 #define USERDATA_FREED (0xDEAD)
@@ -139,15 +141,15 @@ static const char *arg_value(int argc, char **argv, const char *prefix) {
 
 int main(int argc, char **argv) {
     const char *tag_str = arg_value(argc, argv, "--tag=");
-    const char *missing_str = arg_value(argc, argv, "--missing-tag=");
+    const char *failing_str = arg_value(argc, argv, "--failing-tag=");
     user_data_t *ud = NULL;
     int32_t tag_x = 0;
     int32_t tag_b = 0;
     int64_t deadline = 0;
     int32_t result = 1;
 
-    if(!tag_str || !missing_str) {
-        printf("Usage: test_create_fail_callback --tag=<existing tag with auto_sync_read_ms> --missing-tag=<missing tag>\n");
+    if(!tag_str || !failing_str) {
+        printf("Usage: test_create_fail_callback --tag=<existing tag with auto_sync_read_ms> --failing-tag=<tag>\n");
         return 1;
     }
 
@@ -175,11 +177,11 @@ int main(int argc, char **argv) {
     if(!ud) { goto done; }
     ud->magic = USERDATA_LIVE;
 
-    tag_b = plc_tag_create_ex(missing_str, tag_b_callback, ud, DATA_TIMEOUT);
-    printf("plc_tag_create_ex() for the missing tag returned %s.\n", plc_tag_decode_error(tag_b));
+    tag_b = plc_tag_create_ex(failing_str, tag_b_callback, ud, B_TIMEOUT_MS);
+    printf("plc_tag_create_ex() for the failing tag returned %s.\n", plc_tag_decode_error(tag_b));
 
     if(tag_b >= 0) {
-        printf("FAIL: the missing tag was created.\n");
+        printf("FAIL: the failing tag was created.\n");
         plc_tag_destroy(tag_b);
         goto done;
     }

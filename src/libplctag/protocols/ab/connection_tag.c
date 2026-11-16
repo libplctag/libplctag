@@ -127,9 +127,11 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
             return (plc_tag_p)tag;
         }
     } else {
-        if(session_find_or_create(&tag->session, attribs, &new_session) != PLCTAG_STATUS_OK) {
+        int32_t session_rc = session_find_or_create(&tag->session, attribs, &new_session);
+
+        if(session_rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_INFO, 0, "Unable to create session!");
-            tag->status = PLCTAG_ERR_BAD_GATEWAY;
+            tag->status = (int8_t)session_rc;
             return (plc_tag_p)tag;
         }
     }

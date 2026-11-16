@@ -180,7 +180,7 @@ REQUIRED_EXECUTABLES = [
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
     "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy", "test_find_or_create_tag",
-    "test_tag_listing_reread",
+    "test_tag_listing_reread", "test_create_fail_callback",
 ]
 
 
@@ -344,6 +344,21 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=N250:0",
               "--debug=4"],
              expect_error="PLCTAG_ERR_REMOTE_ERR"),  # N250 does not exist
+        # Named fields of structured files (#688).  Read only; the files exist in any default project.
+        test("Micrologix named field T4:0.ACC read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=T4:0.ACC", "--debug=4"]),
+        test("Micrologix named field C5:0.ACC read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=C5:0.ACC", "--debug=4"]),
+        test("Micrologix named field R6:0.LEN read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=R6:0.LEN", "--debug=4"]),
+        test("Micrologix named bit T4:0.DN read",
+             [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=T4:0.DN", "--debug=4"]),
+        test("PLC5 named field T4:0.ACC read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&name=T4:0.ACC", "--debug=4"]),
+        # Abort a read in flight and read again at once: no stale completion (#687).
+        test("Micrologix abort a read, then read again",
+             [exe("test_write_before_read"), "--abort-reread",
+              f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0"]),
         test("B data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=B3:0",
               "--debug=4", "--write=0", "--check"]),
@@ -528,6 +543,11 @@ def build_manifest() -> list[Test]:
              [exe("test_write_before_read"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestBigArray",
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1000&name=TestBigArray"]),
+        # Abort a read in flight and read again at once: no stale completion (#687).
+        test("abort a read, then read again",
+             [exe("test_write_before_read"), "--abort-reread",
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1000&name=TestBigArray",
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1000&name=TestBigArray&use_connected_msg=0"]),
         # Each @connection test watches its own connection, so they run alongside anything.
         test("connection tag connection state transitions (ControlLogix)",
              [exe("test_connection_tag"),
@@ -550,6 +570,16 @@ def build_manifest() -> list[Test]:
         # The command line names no tag; it writes TestBigArray[0..19].
         test("plc_tag_set_size fails with BUSY while a read or write is in flight (ControlLogix)",
              [exe("test_cip_ops"), "--mode=set-size-busy",
+              f"--base=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix"],
+             resources=frozenset({("logix", "TestBigArray", True)})),
+        # A create that fails after it returned must not call its callback (#684).  The failing tag
+        # names no plc and has its own connection, so it waits for identify, then fails on its name.
+        test("no callback after a failed plc_tag_create_ex() returns (ControlLogix)",
+             [exe("test_create_fail_callback"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=50",
+              f"--failing-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&connection_group_id=1&elem_count=1&name=1abc"]),
+        test("an async read fills the read cache and hits do not restart its window (ControlLogix)",
+             [exe("test_cip_ops"), "--mode=read-cache",
               f"--base=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix"],
              resources=frozenset({("logix", "TestBigArray", True)})),
     ]

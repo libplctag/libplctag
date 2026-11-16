@@ -451,10 +451,20 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             tag->status = PLCTAG_ERR_NOT_FOUND;
             return (plc_tag_p)tag;
         }
+
+        /* a clone shares the connection, so it cannot ask for the other kind of messaging. */
+        if(plc && session_connected_conflicts(tag->session, tag->use_connected_msg)) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "use_connected_msg=%d conflicts with the source's connection!",
+                   tag->use_connected_msg);
+            tag->status = PLCTAG_ERR_BAD_PARAM;
+            return (plc_tag_p)tag;
+        }
     } else {
-        if(session_find_or_create(&tag->session, attribs, NULL) != PLCTAG_STATUS_OK) {
+        int32_t session_rc = session_find_or_create(&tag->session, attribs, NULL);
+
+        if(session_rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
-            tag->status = PLCTAG_ERR_BAD_GATEWAY;
+            tag->status = (int8_t)session_rc;
             return (plc_tag_p)tag;
         }
     }
@@ -576,8 +586,13 @@ int cip_plc_tag_create(ab_tag_p tag, attr attribs, bool from_src) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(!tag->byte_order) {
-        tag->byte_order = (tag->plc_type == AB_PLC_OMRON_NJNX) ? &omron_tag_byte_order : &logix_tag_byte_order;
+    /* the family's strings.  A special tag set its own; a deferred one started from Logix's. */
+    if(!tag->byte_order || tag->byte_order == &logix_tag_byte_order) {
+        switch(tag->plc_type) {
+            case AB_PLC_OMRON_NJNX: tag->byte_order = &omron_tag_byte_order; break;
+            case AB_PLC_MICRO800: tag->byte_order = &cip_short_string_byte_order; break;
+            default: tag->byte_order = &logix_tag_byte_order; break;
+        }
     }
 
     /* a special tag set its own vtable. */

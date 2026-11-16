@@ -183,6 +183,28 @@ tag_byte_order_t logix_tag_byte_order = {.is_allocated = 0,
                                          .str_pad_bytes = 2};
 
 
+/* Micro800 SHORT_STRING: a 1-byte count and exactly that many characters, packed with no padding. */
+tag_byte_order_t cip_short_string_byte_order = {.is_allocated = 0,
+
+                                                .int16_order = {0, 1},
+                                                .int32_order = {0, 1, 2, 3},
+                                                .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+                                                .float32_order = {0, 1, 2, 3},
+                                                .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+
+                                                .str_is_defined = 1,
+                                                .str_is_counted = 1,
+                                                .str_is_fixed_length = 0,
+                                                .str_is_zero_terminated = 0,
+                                                .str_is_byte_swapped = 0,
+
+                                                .str_pad_to_multiple_bytes = 1,
+                                                .str_count_word_bytes = 1,
+                                                .str_max_capacity = 255,
+                                                .str_total_length = 0,
+                                                .str_pad_bytes = 0};
+
+
 /* Omron NJ/NX strings: a 2-byte count, then the characters, zero terminated. */
 tag_byte_order_t omron_tag_byte_order = {.is_allocated = 0,
 
@@ -1019,6 +1041,11 @@ static int check_read_status(ab_tag_p tag) {
                 pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
                 tag->pre_write_read = 0;
                 rc = tag_write_start((plc_tag_p)tag);
+            } else if(tag->is_bit && tag->bit >= tag->size * 8) {
+                /* the name cannot say how wide the element is; the first read does.  A bit tag is one element. */
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Bit %d is past the end of a %d byte element!", tag->bit,
+                       tag->size);
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
             } else {
                 pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Read complete.");
             }

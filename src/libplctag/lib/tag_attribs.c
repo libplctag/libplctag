@@ -189,6 +189,11 @@ static const attr_def_t core_attribs[] = {
      .description = "Pad the string data out to a multiple of this many bytes.",
      .get_int = core_get_str_pad_to_multiple_bytes},
 
+    {.name = "write_pad_alignment_bytes",
+     .type = ATTR_TYPE_INT,
+     .description = "Pad written data out to a multiple of this many bytes: 1, 2 or 4.",
+     .get_int = core_get_str_pad_to_multiple_bytes},
+
     {.name = "int16_byte_order",
      .type = ATTR_TYPE_STRING,
      .description = "The byte order of a 16-bit integer, as the comma-separated list the tag string uses.",

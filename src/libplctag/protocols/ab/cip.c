@@ -677,7 +677,7 @@ int parse_bit_segment(ab_tag_p tag, const char *name, int *name_index) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if((val < 0) || (val >= 65536)) {
+    if((val < 0) || (val > 255)) {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id, "Bit identifier must be between 0 and 255, inclusive, was %d!",
                (int)val);
         return PLCTAG_ERR_BAD_PARAM;

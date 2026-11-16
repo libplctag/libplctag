@@ -49,6 +49,8 @@
  *                          holding the tag's API mutex; the write completes once it returns.
  *   set-size-busy          plc_tag_set_size fails with BUSY while a read or write is in flight, and
  *                          works once it ends.  Needs a server delay.
+ *   read-cache             an async read fills the read cache, and cache hits do not restart its
+ *                          window, so a tag read faster than read_cache_ms still reaches the PLC (#683).
  *
  * Every tag is an element of TestBigArray, a DINT array the simulator must provide with at
  * least --count elements.  The test writes element i as i * 3 + 1 first, so each read checks
@@ -72,12 +74,16 @@
 #define DESTROY_ROUNDS (20)
 #define MAX_TAGS (2000)
 #define ATTR_LEN (512)
+#define CACHE_MS (500)
+#define CACHE_RUN_MS (1600)
+#define CACHE_POLL_MS (100)
 
 static int32_t run_abort_packed(const char *base, int32_t count);
 static int32_t run_destroy_in_flight(const char *base, int32_t count);
 static int32_t run_many_tags(const char *base, int32_t count);
 static int32_t run_callback_holds_mutex(const char *base);
 static int32_t run_set_size_busy(const char *base);
+static int32_t run_read_cache(const char *base);
 static int32_t write_values(const char *base, int32_t count);
 static int32_t create_elem(const char *base, int32_t index, int32_t timeout);
 static int32_t wait_not_pending(const int32_t *ids, int32_t count, int32_t timeout_ms);
@@ -89,6 +95,7 @@ static int32_t ids[MAX_TAGS];
 static compat_atomic_int32_t callback_armed;
 static compat_atomic_int32_t callback_slept;
 static compat_atomic_int32_t writes_completed;
+static compat_atomic_int32_t reads_completed;
 
 
 static int32_t value_of(int32_t index) { return index * 3 + 1; }
@@ -111,7 +118,7 @@ int main(int argc, char **argv) {
     }
 
     if(!mode || !base || count < 2 || count > MAX_TAGS) {
-        printf("Usage: test_cip_ops --mode=<abort-packed|destroy-in-flight|many-tags|callback-holds-mutex|set-size-busy> "
+        printf("Usage: test_cip_ops --mode=<abort-packed|destroy-in-flight|many-tags|callback-holds-mutex|set-size-busy|read-cache> "
                "--base=\"<tag string>\" [--count=2..%d]\n",
                MAX_TAGS);
         return 1;
@@ -134,6 +141,8 @@ int main(int argc, char **argv) {
         failures = run_callback_holds_mutex(base);
     } else if(strcmp(mode, "set-size-busy") == 0) {
         failures = run_set_size_busy(base);
+    } else if(strcmp(mode, "read-cache") == 0) {
+        failures = run_read_cache(base);
     } else {
         printf("Unknown mode \"%s\"!\n", mode);
         return 1;
@@ -355,6 +364,9 @@ static void callback(int32_t tag_id, int event, int status, void *userdata) {
     }
 
     if(event == PLCTAG_EVENT_WRITE_COMPLETED) { compat_atomic_add_int32(&writes_completed, 1); }
+
+    /* a cache hit raises READ_STARTED only, so this counts reads that reached the PLC. */
+    if(event == PLCTAG_EVENT_READ_COMPLETED) { compat_atomic_add_int32(&reads_completed, 1); }
 }
 
 
@@ -464,6 +476,78 @@ static int32_t run_set_size_busy(const char *base) {
         printf("FAIL: plc_tag_set_size on an idle tag returned %s.\n", plc_tag_decode_error(rc));
         failures++;
     }
+
+    plc_tag_destroy(id);
+
+    return failures;
+}
+
+
+static int32_t run_read_cache(const char *base) {
+    char attrs[ATTR_LEN];
+    int32_t failures = 0;
+    int32_t id = 0;
+    int32_t rc = PLCTAG_STATUS_OK;
+    int32_t calls = 0;
+    int32_t real_reads = 0;
+    int64_t end = 0;
+
+    compat_snprintf(attrs, sizeof(attrs), "%s&elem_count=1&read_cache_ms=%d&name=TestBigArray[1]", base, CACHE_MS);
+
+    id = plc_tag_create_ex(attrs, callback, NULL, DATA_TIMEOUT);
+    if(id < 0) {
+        printf("FAIL: unable to create the tag, %s.\n", plc_tag_decode_error(id));
+        return 1;
+    }
+
+    /* let the create's read fall out of the cache. */
+    compat_sleep_ms(CACHE_MS + CACHE_POLL_MS, NULL);
+
+    /* an async read fills the cache, so the next read is a hit. */
+    rc = plc_tag_read(id, 0);
+    if(rc != PLCTAG_STATUS_PENDING) {
+        printf("FAIL: the async read returned %s, not PENDING.\n", plc_tag_decode_error(rc));
+        failures++;
+    }
+
+    if(wait_not_pending(&id, 1, DATA_TIMEOUT) != PLCTAG_STATUS_OK) { failures++; }
+    failures += check_value(id, 1);
+
+    rc = plc_tag_read(id, 0);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("FAIL: the read after an async read returned %s, not a cache hit.\n", plc_tag_decode_error(rc));
+        failures++;
+        wait_not_pending(&id, 1, DATA_TIMEOUT);
+    }
+
+    /* blocking reads more often than the window: the hits must not keep it open. */
+    compat_sleep_ms(CACHE_MS + CACHE_POLL_MS, NULL);
+    compat_atomic_store_int32(&reads_completed, 0);
+
+    end = compat_time_ms() + CACHE_RUN_MS;
+    while(compat_time_ms() < end) {
+        rc = plc_tag_read(id, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("FAIL: a read returned %s.\n", plc_tag_decode_error(rc));
+            failures++;
+            break;
+        }
+
+        calls++;
+        compat_sleep_ms(CACHE_POLL_MS, NULL);
+    }
+
+    real_reads = compat_atomic_load_int32(&reads_completed);
+    printf("%" PRId32 " reads in %dms with a %dms cache reached the PLC %" PRId32 " time(s).\n", calls, CACHE_RUN_MS, CACHE_MS,
+           real_reads);
+
+    /* about one real read per window: more than one proves the window ends, fewer than half the calls that it works. */
+    if(real_reads < 2 || real_reads * 2 > calls) {
+        printf("FAIL: expected between 2 and %" PRId32 " reads to reach the PLC.\n", calls / 2);
+        failures++;
+    }
+
+    failures += check_value(id, 1);
 
     plc_tag_destroy(id);
 

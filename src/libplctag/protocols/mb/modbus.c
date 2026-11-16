@@ -1125,6 +1125,8 @@ THREAD_FUNC(modbus_plc_handler) {
                            "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
                            err_delay);
 
+                    /* the connect failed, so the connection is down before the retry wait starts. */
+                    mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DOWN);
                     plc->state = PLC_ERR_WAIT;
                 }
                 break;
@@ -1165,6 +1167,8 @@ THREAD_FUNC(modbus_plc_handler) {
                            "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
                            err_delay);
 
+                    /* the connect failed, so the connection is down before the retry wait starts. */
+                    mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DOWN);
                     plc->state = PLC_ERR_WAIT;
                 }
                 break;

@@ -559,6 +559,12 @@ def build_manifest() -> Manifest:
               [exe("test_write_before_read"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=Test_Array_1",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1"], F)
+    # Abort a read in flight and read again at once: the aborted read completes once with
+    # ABORT, the next once with OK, never with PENDING (#687).
+    sec.test("abort a read, then read again (connected and unconnected)",
+              [exe("test_write_before_read"), "--abort-reread",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1&use_connected_msg=0"], F)
     # A create read that ends in an abort or a PLC error fails the create for good: status,
     # read and write all keep reporting it.  Its own server, so nothing races the tests above.
     create_fail_server = ServerSpec(
@@ -656,7 +662,7 @@ def build_manifest() -> Manifest:
     # Mixed periods re-arm tags into the middle of the handler's tag list, not at either end.
     sec.test("auto-sync reads at mixed periods (AB ControlLogix)",
               [exe("test_auto_read"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
-               "--num-tags=700", "--duration=10", "--periods=50,100,250,500,1000,2000,5000"], S)
+               "--num-tags=700", "--duration=10", "--periods=50,100,250,500,1000,2000,5000"], T)
     sec.test("auto-destroy idle tags (AB ControlLogix)",
               [exe("test_auto_destroy"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]"], T)
     # No plc attribute: the tags are created while the connection still identifies the device.
@@ -754,7 +760,8 @@ def build_manifest() -> Manifest:
     sec.test("no callback after a failed plc_tag_create_ex() returns (AB/EIP)",
               [exe("test_create_fail_callback"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=50",
-               f"--missing-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=DoesNotExist"], F)
+               # no plc and its own connection: it waits for identify, then fails on the bad name (#684).
+               f"--failing-tag=protocol=ab-eip&gateway={gw}&path=1,0&connection_group_id=1&elem_count=1&name=1abc"], F)
     # An operation queued, packed or on the wire.  Each test gets its own simulator, because
     # each writes TestBigArray first and checks every element it reads back.  The delay holds
     # each exchange open long enough for the next reads to queue behind it and pack.
@@ -795,6 +802,8 @@ def build_manifest() -> Manifest:
               F, server=cip_ops_server(300))
     sec.test("plc_tag_set_size fails with BUSY while a read or write is in flight",
               [exe("test_cip_ops"), "--mode=set-size-busy", cip_ops_base], F, server=cip_ops_server(300))
+    sec.test("an async read fills the read cache and hits do not restart its window",
+              [exe("test_cip_ops"), "--mode=read-cache", cip_ops_base], F, server=cip_ops_server(0))
     sec.test("create-from-tag API (19 permutation tests with AB/EIP)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
@@ -1451,6 +1460,9 @@ def build_manifest() -> Manifest:
 
     sec = m.section("micrologix", server=micrologix_server)
     list_identity(sec, "MicroLogix", 1, 12, 185, "1763-L16BWA B/12.00")
+    sec.test("abort a PCCC read, then read again",
+              [exe("test_write_before_read"), "--abort-reread",
+               f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N7:0"], F)
     missing = sec.test("async create of a missing data file fails for good",
               [exe("test_write_before_read"), "--missing-tag",
                f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N250:0"], F)
