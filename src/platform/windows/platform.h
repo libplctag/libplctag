@@ -128,6 +128,7 @@ extern void *mem_realloc(void *orig, int32_t size);
 extern void mem_free(const void *mem);
 extern void mem_set(void *d1, int c, int32_t size);
 extern void mem_copy(void *dest, void *src, int32_t size);
+extern int32_t mem_copy_bounded(void *dest, int32_t dest_capacity, void *src, int32_t size);
 extern void mem_move(void *dest, void *src, int32_t size);
 extern int mem_cmp(void *src1, int32_t src1_size, void *src2, int32_t src2_size);
 

@@ -74,6 +74,7 @@ typedef struct {
 extern int parse_pccc_logical_address(const char *file_address, pccc_addr_t *address);
 extern int plc5_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *address);
 extern int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *address);
+extern int encode_data(uint8_t *data, int *index, int buf_size, int val);
 
 // extern int plc5_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
 // extern int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);

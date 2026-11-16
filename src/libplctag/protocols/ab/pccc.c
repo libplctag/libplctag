@@ -165,7 +165,6 @@ static int parse_pccc_subelem(const char **str, pccc_addr_t *address);
 static int parse_pccc_subelem_num(const char **str, pccc_addr_t *address);
 static int parse_pccc_subelem_mnemonic(const char **str, pccc_addr_t *address);
 static int parse_pccc_bit_num(const char **str, pccc_addr_t *address);
-static void encode_data(uint8_t *data, int *index, int val);
 // static int encode_file_type(pccc_file_t file_type);
 
 
@@ -361,16 +360,16 @@ int plc5_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *add
     level_byte = 0x06; /* level one and two */
 
     /* add in the data file number. */
-    encode_data(data, size, address->file);
+    if(encode_data(data, size, buf_size, address->file) != PLCTAG_STATUS_OK) { return PLCTAG_ERR_TOO_SMALL; }
 
     /* add in the element number */
-    encode_data(data, size, address->element);
+    if(encode_data(data, size, buf_size, address->element) != PLCTAG_STATUS_OK) { return PLCTAG_ERR_TOO_SMALL; }
 
     /* check to see if we need to put in a subelement. */
     if(address->sub_element >= 0) {
         level_byte |= 0x08;
 
-        encode_data(data, size, address->sub_element);
+        if(encode_data(data, size, buf_size, address->sub_element) != PLCTAG_STATUS_OK) { return PLCTAG_ERR_TOO_SMALL; }
     }
 
     /* store the encoded levels. */
@@ -418,16 +417,18 @@ int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *addr
     }
 
     /* encode the file number */
-    encode_data(data, size, address->file);
+    if(encode_data(data, size, buf_size, address->file) != PLCTAG_STATUS_OK) { return PLCTAG_ERR_TOO_SMALL; }
 
     /* encode the data file type. */
-    encode_data(data, size, (int)address->file_type);
+    if(encode_data(data, size, buf_size, (int)address->file_type) != PLCTAG_STATUS_OK) { return PLCTAG_ERR_TOO_SMALL; }
 
     /* add in the element number */
-    encode_data(data, size, address->element);
+    if(encode_data(data, size, buf_size, address->element) != PLCTAG_STATUS_OK) { return PLCTAG_ERR_TOO_SMALL; }
 
     /* add in the sub-element number */
-    encode_data(data, size, (address->sub_element < 0 ? 0 : address->sub_element));
+    if(encode_data(data, size, buf_size, (address->sub_element < 0 ? 0 : address->sub_element)) != PLCTAG_STATUS_OK) {
+        return PLCTAG_ERR_TOO_SMALL;
+    }
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "SLC/Micrologix encoded address:");
     pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, data, *size);
@@ -1337,7 +1338,21 @@ int parse_pccc_bit_num(const char **str, pccc_addr_t *address) {
 }
 
 
-void encode_data(uint8_t *data, int *index, int val) {
+/*
+ * Append one PCCC logical-address datum at *index: one byte for values that fit, or a 0xFF
+ * escape plus a little-endian 16-bit value for the rest.  buf_size is the capacity of data[]
+ * so the write is bounded here rather than relying on the caller's up-front size check to have
+ * accounted for every datum -- the same shape of bug as the ab_server stack write (Risk 7).
+ */
+int encode_data(uint8_t *data, int *index, int buf_size, int val) {
+    int needed = (val <= 254) ? 1 : 3;
+
+    if(*index < 0 || needed > buf_size - *index) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Encoded PCCC address needs %d more bytes than the %d byte buffer holds!",
+               needed, buf_size);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
     if(val <= 254) {
         data[*index] = (uint8_t)val;
         *index = *index + 1;
@@ -1347,6 +1362,8 @@ void encode_data(uint8_t *data, int *index, int val) {
         data[*index + 2] = (uint8_t)((val >> 8) & 0xff);
         *index = *index + 3;
     }
+
+    return PLCTAG_STATUS_OK;
 }
 
 

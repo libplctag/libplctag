@@ -212,6 +212,48 @@ void mem_copy(void *dest, void *src, int32_t size) {
 }
 
 
+/*
+ * A copy that carries the destination's capacity, so the bound is a parameter rather than
+ * something each caller has to remember to check first.  mem_copy() can only reject a
+ * negative size; it cannot see how big dest is, so a caller that computes size from a wire
+ * field is one missing check away from an overflow.  This refuses the copy (writing nothing)
+ * when size will not fit, the same way the rest of the library treats an oversized length,
+ * rather than silently truncating -- a short copy would be a data-integrity bug of its own.
+ *
+ * Returns the number of bytes copied (always == size) on success, or a negative PLCTAG_ERR_*.
+ */
+int32_t mem_copy_bounded(void *dest, int32_t dest_capacity, void *src, int32_t size) {
+    if(!dest) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!src) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source pointer is NULL!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(size < 0 || dest_capacity < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Size (%d) and destination capacity (%d) must not be negative!", size,
+               dest_capacity);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(size > dest_capacity) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Copy of %d bytes does not fit in a destination of %d bytes!", size,
+               dest_capacity);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    if(size == 0) { return 0; }
+
+    // NOLINTNEXTLINE
+    memcpy(dest, src, (size_t)(unsigned int)size);
+
+    return size;
+}
+
+
 void mem_move(void *dest, void *src, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");

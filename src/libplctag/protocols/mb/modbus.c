@@ -2852,8 +2852,19 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     plc->write_data[plc->write_data_len] = (uint8_t)(unsigned int)(request_payload_size);
     plc->write_data_len++;
 
-    /* copy the tag data. */
-    mem_copy(&plc->write_data[plc->write_data_len], &tag->data[byte_offset], request_payload_size);
+    /*
+     * Copy the tag data into the fixed write buffer.  request_payload_size is derived from the
+     * tag's element count and size, so bound it against what is left in write_data[] rather than
+     * trusting the arithmetic above to have stayed under PLC_WRITE_DATA_LEN.
+     */
+    if(mem_copy_bounded(&plc->write_data[plc->write_data_len], PLC_WRITE_DATA_LEN - plc->write_data_len,
+                        &tag->data[byte_offset], request_payload_size)
+       < 0) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
+               "Write payload of %d bytes does not fit in the remaining %d bytes of the request buffer!", request_payload_size,
+               PLC_WRITE_DATA_LEN - plc->write_data_len);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
     plc->write_data_len += request_payload_size;
 
     tag->seq_id = (uint16_t)(unsigned int)seq_id;
