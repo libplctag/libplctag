@@ -842,11 +842,13 @@ static int test_use_connected_msg_conflict(void) {
         return (int)good;
     }
 
-    int32_t bad = plc_tag_create(bad_attribs, timeout_ms);
-    if(bad != PLCTAG_ERR_BAD_PARAM) {
-        fprintf(stderr, "  FAIL: conflicting create returned %s, expected ERR_BAD_PARAM.\n", plc_tag_decode_error((int)bad));
-        if(bad > 0) { plc_tag_destroy(bad); }
+    /* a create that messages the other way gets its own connection. */
+    int32_t other = plc_tag_create(bad_attribs, timeout_ms);
+    if(other < 0) {
+        fprintf(stderr, "  FAIL: unconnected create beside a connected one returned %s.\n", plc_tag_decode_error((int)other));
         rc = PLCTAG_ERR_BAD_STATUS;
+    } else {
+        plc_tag_destroy(other);
     }
 
     int32_t clone = plc_tag_create_from_tag(good, "name=TestBigArray[1]&elem_count=1&use_connected_msg=0", NULL, NULL,
@@ -927,7 +929,7 @@ int main(int argc, char **argv) {
         RUN_TEST("16. callback fires on clone (CREATED + READ_COMPLETED)", test_callback_fires_on_clone());
         RUN_TEST("17. async create (timeout=0) + poll -> success", test_async_create_and_poll());
         RUN_TEST("18. @connection first: connected, status UP without callback", test_connection_tag_first());
-        RUN_TEST("19. use_connected_msg conflict -> ERR_BAD_PARAM", test_use_connected_msg_conflict());
+        RUN_TEST("19. use_connected_msg: own connection; clone conflict -> ERR_BAD_PARAM", test_use_connected_msg_conflict());
     }
 
     fprintf(stderr, "\nRESULT: %d/%d passed", passed, total);

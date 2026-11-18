@@ -182,12 +182,52 @@ static void test_session_lock_outlives_shutdown(void **state) {
 }
 
 
+/* a connection that messages one way does not match a tag that asks for the other; DH+ matches either. */
+static void test_find_matches_messaging(void **state) {
+    static char host[] = "10.1.2.3";
+    static char path[] = "1,0";
+    cip_conn_p conn = NULL;
+    cip_conn_p found = NULL;
+
+    (void)state;
+
+    conn = (cip_conn_p)rc_alloc((int)sizeof(*conn), NULL);
+    assert_non_null(conn);
+    mutex_init(&conn->session_mutex);
+    conn->host = host;
+    conn->path = path;
+    conn->use_connected_msg = 1;
+    sessions = conn;
+
+    found = find_session_by_host_unsafe(host, path, 0, 1);
+    assert_true(found == conn);
+    rc_dec(found);
+
+    assert_null(find_session_by_host_unsafe(host, path, 0, 0));
+
+    /* a tag that names no PLC matches either. */
+    found = find_session_by_host_unsafe(host, path, 0, -1);
+    assert_true(found == conn);
+    rc_dec(found);
+
+    conn->is_dhp = 1;
+    found = find_session_by_host_unsafe(host, path, 0, 0);
+    assert_true(found == conn);
+    rc_dec(found);
+
+    sessions = NULL;
+    mutex_destroy(&conn->session_mutex);
+    rc_dec(conn);
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_forward_close_header),
         cmocka_unit_test(test_path_fits_8_bits),
         cmocka_unit_test(test_ip_addr_segment),
         cmocka_unit_test(test_dhp_shares_connection),
+        cmocka_unit_test(test_find_matches_messaging),
         cmocka_unit_test(test_session_lock_outlives_shutdown),
     };
 
