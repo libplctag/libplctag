@@ -55,7 +55,6 @@ extern int get_debug_level(void);
 /* Module configuration API */
 extern void debug_module_set_level(debug_module_t module, int level);
 extern int debug_module_get_level(debug_module_t module);
-extern void debug_set_all_modules(int level);
 
 extern bool debug_is_enabled(debug_module_t module, int level);
 

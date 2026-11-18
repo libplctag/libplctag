@@ -141,37 +141,38 @@ START_PACK typedef struct {
 
 /* raw tag functions */
 // static int raw_tag_read_start(ab_tag_p tag);
-static int raw_tag_tickler(ab_tag_p tag);
-static int raw_tag_write_start(ab_tag_p tag);
+static int raw_tag_tickler(plc_tag_p tag_arg);
+static int raw_tag_write_start(plc_tag_p tag_arg);
 static int raw_tag_check_write_status(ab_tag_p tag);
 static int raw_tag_build_write_request(ab_tag_p tag);
 
 
 /* listing tag functions. */
-static int listing_tag_read_start(ab_tag_p tag);
-static int listing_tag_tickler(ab_tag_p tag);
+static int listing_tag_read_start(plc_tag_p tag_arg);
+static int listing_tag_tickler(plc_tag_p tag_arg);
 // static int listing_tag_write_start(ab_tag_p tag);
 static int listing_tag_check_read_status(ab_tag_p tag);
 static int listing_tag_build_read_request(ab_tag_p tag);
 
 
 /* UDT tag functions. */
-static int udt_tag_read_start(ab_tag_p tag);
-static int udt_tag_tickler(ab_tag_p tag);
+static int udt_tag_read_start(plc_tag_p tag_arg);
+static int udt_tag_tickler(plc_tag_p tag_arg);
 // static int listing_tag_write_start(ab_tag_p tag);
 static int udt_tag_check_read_metadata_status(ab_tag_p tag);
 static int udt_tag_build_read_metadata_request(ab_tag_p tag);
 static int udt_tag_check_read_fields_status(ab_tag_p tag);
 static int udt_tag_build_read_fields_request(ab_tag_p tag);
+static uint32_t udt_fields_size(uint32_t words);
 
 
 /* define the vtable for raw tag type. */
 struct tag_vtable_t raw_tag_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .abort = ab_tag_vtable_abort,
     .read = NULL,
-    .status = (tag_vtable_func)ab_tag_status,
-    .tickler = (tag_vtable_func)raw_tag_tickler,
-    .write = (tag_vtable_func)raw_tag_write_start,
+    .status = ab_tag_status,
+    .tickler = raw_tag_tickler,
+    .write = raw_tag_write_start,
     .wake_plc = NULL,
     .tag_data_written = NULL,
 
@@ -181,10 +182,10 @@ struct tag_vtable_t raw_tag_vtable = {
 
 /* define the vtable for listing tag type. */
 struct tag_vtable_t listing_tag_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
-    .read = (tag_vtable_func)listing_tag_read_start,
-    .status = (tag_vtable_func)ab_tag_status,
-    .tickler = (tag_vtable_func)listing_tag_tickler,
+    .abort = ab_tag_vtable_abort,
+    .read = listing_tag_read_start,
+    .status = ab_tag_status,
+    .tickler = listing_tag_tickler,
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
@@ -196,10 +197,10 @@ struct tag_vtable_t listing_tag_vtable = {
 
 /* define the vtable for udt tag type. */
 struct tag_vtable_t udt_tag_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
-    .read = (tag_vtable_func)udt_tag_read_start,
-    .status = (tag_vtable_func)ab_tag_status,
-    .tickler = (tag_vtable_func)udt_tag_tickler,
+    .abort = ab_tag_vtable_abort,
+    .read = udt_tag_read_start,
+    .status = ab_tag_status,
+    .tickler = udt_tag_tickler,
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
@@ -280,7 +281,8 @@ int setup_raw_tag(ab_tag_p tag) {
 }
 
 
-int raw_tag_tickler(ab_tag_p tag) {
+int raw_tag_tickler(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -326,7 +328,8 @@ int raw_tag_tickler(ab_tag_p tag) {
  *
  * The routine starts the process of writing to a tag.
  */
-int raw_tag_write_start(ab_tag_p tag) {
+int raw_tag_write_start(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
@@ -439,19 +442,19 @@ int raw_tag_build_write_request(ab_tag_p tag) {
  ******************************************************************/
 
 /* identity tag functions */
-static int identity_tag_read_start(ab_tag_p tag);
-static int identity_tag_tickler(ab_tag_p tag);
+static int identity_tag_read_start(plc_tag_p tag_arg);
+static int identity_tag_tickler(plc_tag_p tag_arg);
 static int identity_tag_check_read_status(ab_tag_p tag);
 static int identity_tag_build_read_request(ab_tag_p tag);
 
 
 /* define the vtable for identity tag type. */
-struct tag_vtable_t identity_tag_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request,
-                                           .read = (tag_vtable_func)identity_tag_read_start,
-                                           .status = (tag_vtable_func)ab_tag_status,
-                                           .tickler = (tag_vtable_func)identity_tag_tickler,
-                                           .write = (tag_vtable_func)NULL,
-                                           .wake_plc = (tag_vtable_func)NULL,
+struct tag_vtable_t identity_tag_vtable = {.abort = ab_tag_vtable_abort,
+                                           .read = identity_tag_read_start,
+                                           .status = ab_tag_status,
+                                           .tickler = identity_tag_tickler,
+                                           .write = NULL,
+                                           .wake_plc = NULL,
 
                                            /* attribute accessors */
                                            .attribs = ab_attribs};
@@ -478,7 +481,8 @@ int setup_identity_tag(ab_tag_p tag) {
 }
 
 
-int identity_tag_read_start(ab_tag_p tag) {
+int identity_tag_read_start(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
@@ -509,7 +513,8 @@ int identity_tag_read_start(ab_tag_p tag) {
 }
 
 
-int identity_tag_tickler(ab_tag_p tag) {
+int identity_tag_tickler(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -767,7 +772,8 @@ int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
  * The function starts the process of getting tag data from the PLC.
  */
 
-int listing_tag_read_start(ab_tag_p tag) {
+int listing_tag_read_start(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
@@ -808,7 +814,8 @@ int listing_tag_read_start(ab_tag_p tag) {
 }
 
 
-int listing_tag_tickler(ab_tag_p tag) {
+int listing_tag_tickler(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -863,17 +870,13 @@ int listing_tag_tickler(ab_tag_p tag) {
 
 int listing_tag_check_read_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
-    int partial_data = 0;
+    bool partial_data = false;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
     /* if we got here then we have a request and it was processed correctly. */
-
-    /* point to the data */
-    cip_resp = (cip_header *)(tag->req->data);
 
     /* point to the start of the data */
     data = (tag->req->data) + sizeof(cip_header);
@@ -885,26 +888,8 @@ int listing_tag_check_read_status(ab_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_LIST_TAGS | AB_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
-                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-            break;
-        }
-
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        rc = cip_check_reply(tag->tag_id, tag->req->data, data_end, AB_EIP_CMD_CIP_LIST_TAGS, &partial_data);
+        if(rc != PLCTAG_STATUS_OK) { break; }
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -1248,7 +1233,8 @@ int setup_udt_tag(ab_tag_p tag, const char *name) {
  * The function starts the process of getting UDT data from the PLC.
  */
 
-int udt_tag_read_start(ab_tag_p tag) {
+int udt_tag_read_start(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
@@ -1286,7 +1272,8 @@ int udt_tag_read_start(ab_tag_p tag) {
 }
 
 
-int udt_tag_tickler(ab_tag_p tag) {
+int udt_tag_tickler(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -1347,7 +1334,7 @@ int udt_tag_check_read_metadata_status(ab_tag_p tag) {
     cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
-    int partial_data = 0;
+    bool partial_data = false;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
@@ -1366,26 +1353,8 @@ int udt_tag_check_read_metadata_status(ab_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_GET_ATTR_LIST | AB_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
-                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-            break;
-        }
-
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        rc = cip_check_reply(tag->tag_id, tag->req->data, data_end, AB_EIP_CMD_CIP_GET_ATTR_LIST, &partial_data);
+        if(rc != PLCTAG_STATUS_OK) { break; }
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -1662,17 +1631,13 @@ int udt_tag_build_read_metadata_request(ab_tag_p tag) {
 
 int udt_tag_check_read_fields_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
-    int partial_data = 0;
+    bool partial_data = false;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
     /* the request is there and valid */
-
-    /* point to the data */
-    cip_resp = (cip_header *)(tag->req->data);
 
     /* point to the start of the data */
     data = (tag->req->data) + sizeof(cip_header);
@@ -1684,26 +1649,8 @@ int udt_tag_check_read_fields_status(ab_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
-                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-            break;
-        }
-
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        rc = cip_check_reply(tag->tag_id, tag->req->data, data_end, AB_EIP_CMD_CIP_READ, &partial_data);
+        if(rc != PLCTAG_STATUS_OK) { break; }
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -1808,6 +1755,21 @@ int udt_tag_check_read_fields_status(ab_tag_p tag) {
 }
 
 
+/*
+ * The field definitions are (4 * words) - 23 bytes, from the docs, rounded up to 4 bytes.  The
+ * request carries the size in 16 bits.  0 (refused) under 6 words or over 16 bits.
+ */
+static uint32_t udt_fields_size(uint32_t words) {
+    uint64_t bytes = 0;
+
+    if(words < 6) { return 0; }
+
+    bytes = (((uint64_t)words * 4) - 23 + 3) & ~(uint64_t)3;
+
+    return (bytes > UINT16_MAX) ? 0 : (uint32_t)bytes;
+}
+
+
 int udt_tag_build_read_fields_request(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
@@ -1815,9 +1777,22 @@ int udt_tag_build_read_fields_request(ab_tag_p tag) {
     uint16_le tmp_u16 = UINT16_LE_INIT(0);
     uint32_le tmp_u32 = UINT32_LE_INIT(0);
     uint32_t total_size = 0;
-    uint32_t neg_4 = (~(uint32_t)4) + 1; /* twos-complement */
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    /* the size comes from the PLC's metadata reply. */
+    if(tag->size < 6) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "UDT metadata of %d bytes is too short!", tag->size);
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    mem_copy(&tmp_u32, tag->data + 2, (int)(unsigned int)(sizeof(tmp_u32)));
+    total_size = udt_fields_size(le2h32(tmp_u32));
+    if(!total_size) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "UDT definition size of %u words is not valid!",
+               (unsigned int)le2h32(tmp_u32));
+        return PLCTAG_ERR_BAD_REPLY;
+    }
 
     /* get a request buffer */
     rc = session_create_request(tag->session, tag->tag_id, &tag->req);
@@ -1826,16 +1801,6 @@ int udt_tag_build_read_fields_request(ab_tag_p tag) {
         ab_tag_abort_request(tag);
         return rc;
     }
-
-    /* calculate the total size we need to get. */
-    mem_copy(&tmp_u32, tag->data + 2, (int)(unsigned int)(sizeof(tmp_u32)));
-    total_size = (4 * le2h32(tmp_u32)) - 23; /* formula according to the docs. */
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Calculating total size of request, %d to %d.",
-           (int)(unsigned int)total_size, (int)(unsigned int)((total_size + (uint32_t)3) & (uint32_t)neg_4));
-
-    /* make the total size a multiple of 4 bytes.  Round up. */
-    total_size = (total_size + 3) & (uint32_t)neg_4;
 
     /* point the request struct at the buffer */
 

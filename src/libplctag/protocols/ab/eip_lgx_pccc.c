@@ -69,17 +69,17 @@ START_PACK typedef struct {
 } END_PACK embedded_pccc;
 
 
-static int tag_read_start(ab_tag_p tag);
-static int tag_status(ab_tag_p tag);
-static int tag_tickler(ab_tag_p tag);
-static int tag_write_start(ab_tag_p tag);
+static int tag_read_start(plc_tag_p tag_arg);
+static int tag_status(plc_tag_p tag_arg);
+static int tag_tickler(plc_tag_p tag_arg);
+static int tag_write_start(plc_tag_p tag_arg);
 
 struct tag_vtable_t lgx_pccc_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
-    .read = (tag_vtable_func)tag_read_start,
-    .status = (tag_vtable_func)tag_status,
-    .tickler = (tag_vtable_func)tag_tickler,
-    .write = (tag_vtable_func)tag_write_start,
+    .abort = ab_tag_vtable_abort,
+    .read = tag_read_start,
+    .status = tag_status,
+    .tickler = tag_tickler,
+    .write = tag_write_start,
     .wake_plc = NULL,
     .tag_data_written = NULL,
 
@@ -95,7 +95,8 @@ static int check_write_status(ab_tag_p tag);
  *
  * CIP/PCCC-specific status.
  */
-int tag_status(ab_tag_p tag) {
+int tag_status(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     if(!tag->session) {
         /* this is not OK.  This is fatal! */
         return PLCTAG_ERR_CREATE;
@@ -109,7 +110,8 @@ int tag_status(ab_tag_p tag) {
 }
 
 
-int tag_tickler(ab_tag_p tag) {
+int tag_tickler(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -159,10 +161,11 @@ int tag_tickler(ab_tag_p tag) {
  * Start a PCCC tag read (PLC5, SLC).
  */
 
-int tag_read_start(ab_tag_p tag) {
+int tag_read_start(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = session_get_new_seq_id(tag->session);
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
@@ -292,8 +295,8 @@ static int check_read_status(ab_tag_p tag) {
         if(pccc->general_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
                    pccc->general_status,
-                   decode_cip_error_long((uint8_t *)&(pccc->general_status),
-                                         cip_error_data_size((uint8_t *)&(pccc->general_status), data_end)));
+                   decode_cip_error_short((uint8_t *)&(pccc->general_status),
+                                          cip_error_data_size((uint8_t *)&(pccc->general_status), data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -372,7 +375,7 @@ static int check_read_status(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
 
         tag->pre_write_read = 0;
-        rc = tag_write_start(tag);
+        rc = tag_write_start((plc_tag_p)tag);
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
@@ -381,10 +384,11 @@ static int check_read_status(ab_tag_p tag) {
 }
 
 
-int tag_write_start(ab_tag_p tag) {
+int tag_write_start(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = session_get_new_seq_id(tag->session);
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
@@ -408,7 +412,7 @@ int tag_write_start(ab_tag_p tag) {
                    "No read has completed yet, doing pre-read to get type information.");
             tag->pre_write_read = 1;
             tag->write_in_progress = 0;
-            rc = tag_read_start(tag);
+            rc = tag_read_start((plc_tag_p)tag);
             break;
         }
 

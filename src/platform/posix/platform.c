@@ -190,31 +190,6 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
 
 
 /*
- * platform_thread_stop()
- *
- * Stop the current thread.  Does not take arguments.  Note: the thread
- * ends completely and this function does not return!
- */
-void thread_stop(void) { pthread_exit((void *)0); }
-
-
-/*
- * thread_kill()
- *
- * Kill another thread.
- */
-
-void thread_kill(thread_p t) {
-    if(t) {
-#ifdef __ANDROID__
-        pthread_kill(t->p_thread, 0);
-#else
-        pthread_cancel(t->p_thread);
-#endif /* __ANDROID__ */
-    }
-}
-
-/*
  * thread_join()
  *
  * Wait for the argument thread to stop and then continue.
@@ -246,19 +221,6 @@ int thread_join(thread_p t) {
     }
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/*
- * thread_detach
- *
- * Detach the thread.  You cannot call thread_join on a detached thread!
- */
-
-extern int thread_detach(void) {
-    pthread_detach(pthread_self());
 
     return PLCTAG_STATUS_OK;
 }

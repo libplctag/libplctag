@@ -56,26 +56,12 @@
 #include <utils/debug.h>
 #include <utils/vector.h>
 
-/* Minimal view of AB device-tag layout needed for source-session sharing. */
-typedef struct ab_connection_tag_view_s {
-    TAG_BASE_STRUCT;
-    cip_conn_p session;
-} ab_connection_tag_view_t;
-
 /*
  * Externally visible global variables
  */
 
-// volatile cip_conn_p sessions = NULL;
-// volatile mutex_p global_session_mut = NULL;
-//
-// volatile vector_p read_group_tags = NULL;
 
 
-/* request/response handling thread */
-volatile thread_p io_handler_thread = NULL;
-
-volatile int ab_protocol_terminating = 0;
 
 
 /*
@@ -84,10 +70,6 @@ volatile int ab_protocol_terminating = 0;
  * These are the primary entry points into the AB protocol
  * stack.
  */
-
-
-#define DEFAULT_NUM_RETRIES (5)
-#define DEFAULT_RETRY_INTERVAL (300)
 
 
 /* forward declarations*/
@@ -147,8 +129,6 @@ int ab_init(void) {
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Initializing AB protocol library.");
 
-    ab_protocol_terminating = 0;
-
     if((rc = session_startup()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_ERROR, 0, "Unable to initialize session library!");
         return rc;
@@ -158,34 +138,6 @@ int ab_init(void) {
 
     return rc;
 }
-
-/*
- * called when the whole program is going to terminate.
- */
-void ab_teardown(void) {
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Releasing global AB protocol resources.");
-
-    if(io_handler_thread) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Terminating IO thread.");
-        /* signal the IO thread to quit first. */
-        ab_protocol_terminating = 1;
-
-        /* wait for the thread to die */
-        thread_join(io_handler_thread);
-        thread_destroy((thread_p *)&io_handler_thread);
-    } else {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "IO thread already stopped.");
-    }
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Freeing session information.");
-
-    session_teardown();
-
-    ab_protocol_terminating = 0;
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Done.");
-}
-
 
 static const char *const plc5_aliases[] = {"plc5", "plc", NULL};
 static const char *const slc_aliases[] = {"slc500", "slc", NULL};
@@ -355,7 +307,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
 
     tag->vtable = &default_vtable;
-    tag->protocol_type = TAG_PROTOCOL_AB;
+    tag->can_auto_destroy = 1;
 
     /* set up the generic parts. */
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
@@ -374,21 +326,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
 
     if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB: {
-                ab_tag_p src = (ab_tag_p)src_tag;
-                tag->plc_type = src->plc_type;
-                break;
-            }
-
-            case TAG_PROTOCOL_AB_CONNECTION: {
-                ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
-                tag->plc_type = src_device->session ? src_device->session->plc_type : AB_PLC_NONE;
-                break;
-            }
-
-            default: tag->plc_type = AB_PLC_NONE; break;
-        }
+        /* a clone takes the PLC type its connection has. */
+        tag->plc_type = ((cip_conn_p)src_tag->conn)->plc_type;
     } else {
         tag->plc_type = get_plc_type(attribs);
 
@@ -430,21 +369,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      * All tags need sessions.  They are the TCP connection to the gateway PLC.
      */
     if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB: {
-                ab_tag_p src = (ab_tag_p)src_tag;
-                tag->session = rc_inc(src->session);
-                break;
-            }
-
-            case TAG_PROTOCOL_AB_CONNECTION: {
-                ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
-                tag->session = rc_inc(src_device->session);
-                break;
-            }
-
-            default: tag->session = NULL; break;
-        }
+        tag->session = rc_inc((cip_conn_p)src_tag->conn);
 
         if(!tag->session) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
@@ -468,6 +393,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             return (plc_tag_p)tag;
         }
     }
+
+    tag->conn = tag->session;
+    tag->create_func = ab_tag_create;
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->session);
 
@@ -971,6 +899,9 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
  * that locks the tag's mutex or only from a single thread.
  */
 
+int ab_tag_vtable_abort(plc_tag_p tag) { return ab_tag_abort_request((ab_tag_p)tag); }
+
+
 int ab_tag_abort_request(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag ? tag->tag_id : 0, "Starting.");
 
@@ -1022,7 +953,8 @@ int ab_tag_abort(ab_tag_p tag) {
  *
  * Generic status checker.   May be overridden by individual PLC types.
  */
-int ab_tag_status(ab_tag_p tag) {
+int ab_tag_status(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     if(tag->read_in_progress) { return PLCTAG_STATUS_PENDING; }
@@ -1353,7 +1285,8 @@ static int32_t ab_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t 
 
     if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
 
-    *result = (int32_t)tag->session->only_use_old_forward_open;
+    /* identify can set it on the handler thread. */
+    critical_block(&tag->session->session_mutex) { *result = (int32_t)tag->session->only_use_old_forward_open; }
 
     return PLCTAG_STATUS_OK;
 }

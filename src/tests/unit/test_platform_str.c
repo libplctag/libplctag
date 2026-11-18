@@ -32,16 +32,13 @@
  ***************************************************************************/
 
 /*
- * Unit tests for str_to_int() and str_to_float() in the platform shim.
+ * Unit tests for str_to_int() in the platform shim.
  *
- * Both call a strto*() function and then test errno for ERANGE. strto*() sets
+ * It calls strtol() and then tests errno for ERANGE. strtol() sets
  * errno on failure but never clears it on success, so without an explicit
  * errno = 0 first, a stale ERANGE left by any earlier call is read back as this
  * conversion's own failure. The tests below poison errno the way a real earlier
  * failure would, then check the conversion still succeeds.
- *
- * str_to_float() is the one that bites in practice: its ERANGE test also covers
- * underflow-to-zero, so a stale ERANGE rejects a plain "0".
  *
  * No mocking here, so this test gets none of the -D redirection that test_init.c
  * needs -- it links the real library and calls the real functions.
@@ -63,24 +60,6 @@ static void test_str_to_int_ignores_stale_errno(void **state) {
 
     assert_int_equal(str_to_int("42", &val), 0);
     assert_int_equal(val, 42);
-}
-
-
-/* A stale ERANGE must not reject "0", whose value matches the underflow check. */
-static void test_str_to_float_ignores_stale_errno(void **state) {
-    (void)state;
-
-    float val = 1.0f;
-
-    errno = ERANGE;
-
-    assert_int_equal(str_to_float("0", &val), 0);
-    assert_int_equal(val == 0.0f, 1);
-
-    errno = ERANGE;
-
-    assert_int_equal(str_to_float("1.5", &val), 0);
-    assert_int_equal(val == 1.5f, 1);
 }
 
 
@@ -144,7 +123,6 @@ static void test_str_to_int_rejects_non_numeric(void **state) {
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_str_to_int_ignores_stale_errno),
-        cmocka_unit_test(test_str_to_float_ignores_stale_errno),
         cmocka_unit_test(test_str_to_int_still_detects_overflow),
         cmocka_unit_test(test_str_to_int_rejects_values_wider_than_int),
         cmocka_unit_test(test_str_to_int_rejects_non_numeric),

@@ -94,31 +94,6 @@ void mem_set(void *dest, int c, int32_t size) {
 }
 
 
-int mem_cmp(void *src1, int32_t src1_size, void *src2, int32_t src2_size) {
-    if(!src1 || src1_size <= 0) {
-        if(!src2 || src2_size <= 0) {
-            /* both are NULL or zero length, but that is "equal" for our purposes. */
-            return 0;
-        } else {
-            /* first one is "less" than second. */
-            return -1;
-        }
-    } else {
-        if(!src2 || src2_size <= 0) {
-            /* first is "greater" than second */
-            return 1;
-        } else {
-            /* both pointers are non-NULL and the lengths are positive. */
-
-            /* short circuit the comparison if the blocks are different lengths */
-            if(src1_size != src2_size) { return (src1_size - src2_size); }
-
-            return memcmp(src1, src2, (size_t)(unsigned int)src1_size);
-        }
-    }
-}
-
-
 int str_length(const char *str) {
     if(!str) { return 0; }
 
@@ -147,45 +122,6 @@ int str_cmp(const char *first, const char *second) {
             return strcmp(first, second);
         }
     }
-}
-
-
-char *str_concat_impl(int num_args, ...) {
-    va_list arg_list;
-    int total_length = 0;
-    char *result = NULL;
-    char *tmp = NULL;
-
-    /* first loop to find the length */
-    va_start(arg_list, num_args);
-    for(int i = 0; i < num_args; i++) {
-        tmp = va_arg(arg_list, char *);
-        if(tmp) { total_length += str_length(tmp); }
-    }
-    va_end(arg_list);
-
-    /* make a buffer big enough */
-    total_length += 1;
-
-    result = mem_alloc(total_length);
-    if(!result) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Unable to allocate new string buffer!");
-        return NULL;
-    }
-
-    /* loop to copy the strings */
-    result[0] = 0;
-    va_start(arg_list, num_args);
-    for(int i = 0; i < num_args; i++) {
-        tmp = va_arg(arg_list, char *);
-        if(tmp) {
-            int len = str_length(result);
-            str_copy(&result[len], total_length - len, tmp);
-        }
-    }
-    va_end(arg_list);
-
-    return result;
 }
 
 
@@ -445,31 +381,6 @@ int str_to_int(const char *str, int *val) {
     }
 
     *val = (int)tmp_val;
-
-    return 0;
-}
-
-
-/*
- * Convert the characters in the passed string into a float.
- *
- * strtod() rather than strtof() because the Windows C runtime has no strtof().
- */
-int str_to_float(const char *str, float *val) {
-    char *endptr;
-    double tmp_val;
-
-    /* strtod() only ever sets errno, it never clears it, so a stale ERANGE would read as this failure. */
-    errno = 0;
-
-    tmp_val = strtod(str, &endptr);
-
-    if(errno == ERANGE && (tmp_val == HUGE_VAL || tmp_val == -HUGE_VAL || tmp_val == 0.0)) { return -1; }
-
-    if(endptr == str) { return -1; }
-
-    /* FIXME - this will truncate long values. */
-    *val = (float)tmp_val;
 
     return 0;
 }

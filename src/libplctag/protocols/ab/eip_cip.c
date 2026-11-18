@@ -149,11 +149,11 @@ static int tag_write_start(plc_tag_p tag_arg);
 
 /* define the exported vtable for this tag type. */
 struct tag_vtable_t eip_cip_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
-    .read = (tag_vtable_func)tag_read_start,
-    .status = (tag_vtable_func)ab_tag_status,
-    .tickler = (tag_vtable_func)tag_tickler,
-    .write = (tag_vtable_func)tag_write_start,
+    .abort = ab_tag_vtable_abort,
+    .read = tag_read_start,
+    .status = ab_tag_status,
+    .tickler = tag_tickler,
+    .write = tag_write_start,
     .wake_plc = NULL,
     .tag_data_written = NULL,
 
@@ -249,27 +249,6 @@ tag_byte_order_t omron_tag_byte_order = {.is_allocated = 0,
 #define CIP_CMD_GET_ATTRIBUTES_ALL ((uint8_t)0x01)
 #define CIP_DATA_TYPE_STRING ((uint8_t)0xD0)
 #define CIP_DATA_TYPE_SHORT_STRING ((uint8_t)0xDA)
-
-
-tag_byte_order_t logix_tag_listing_byte_order = {.is_allocated = 0,
-
-                                                 .int16_order = {0, 1},
-                                                 .int32_order = {0, 1, 2, 3},
-                                                 .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-                                                 .float32_order = {0, 1, 2, 3},
-                                                 .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-
-                                                 .str_is_defined = 1,
-                                                 .str_is_counted = 1,
-                                                 .str_is_fixed_length = 0,
-                                                 .str_is_zero_terminated = 0,
-                                                 .str_is_byte_swapped = 0,
-
-                                                 .str_pad_to_multiple_bytes = 1,
-                                                 .str_count_word_bytes = 2,
-                                                 .str_max_capacity = 0,
-                                                 .str_total_length = 0,
-                                                 .str_pad_bytes = 0};
 
 
 /*************************************************************************
@@ -876,8 +855,6 @@ static int check_read_status(ab_tag_p tag) {
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
                    decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
 
             rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
 
@@ -971,17 +948,22 @@ static int check_read_status(ab_tag_p tag) {
                     break;
                 }
 
-                tag->size = (int)payload_size + tag->offset;
-                tag->elem_size = tag->size / tag->elem_count;
+                int new_size = (int)payload_size + tag->offset;
+                uint8_t *new_data = NULL;
 
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.", tag->size);
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.", new_size);
 
-                tag->data = (uint8_t *)mem_realloc(tag->data, tag->size);
-                if(!tag->data) {
+                /* on failure the tag keeps its old buffer and size. */
+                new_data = (uint8_t *)mem_realloc(tag->data, new_size);
+                if(!new_data) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
                     rc = PLCTAG_ERR_NO_MEM;
                     break;
                 }
+
+                tag->data = new_data;
+                tag->size = new_size;
+                tag->elem_size = tag->size / tag->elem_count;
             }
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Got %d bytes of data", (int)payload_size);
@@ -1104,8 +1086,6 @@ static int check_write_status(ab_tag_p tag) {
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
                    decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
             rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
             break;
         }
@@ -1317,7 +1297,6 @@ static int encode_segment_path(ab_tag_p tag, uint8_t *dest, int byte_offset, int
  * not confirmed on hardware; the simulator does.
  */
 static int check_size_probe_status(ab_tag_p tag) {
-    cip_header *cip_resp = (cip_header *)(tag->req->data);
     uint8_t *data = tag->req->data + sizeof(cip_header);
     uint8_t *data_end = tag->req->data + tag->req->request_size;
     int64_t total = 0;
@@ -1326,21 +1305,8 @@ static int check_size_probe_status(ab_tag_p tag) {
     tag->size_probe = false;
 
     do {
-        if(cip_resp->reply_service != (CIP_CMD_GET_ATTRIBUTES_ALL | AB_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != AB_CIP_STATUS_OK) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Variable size request failed with status: 0x%x %s",
-                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-            break;
-        }
+        rc = cip_check_reply(tag->tag_id, tag->req->data, data_end, CIP_CMD_GET_ATTRIBUTES_ALL, NULL);
+        if(rc != PLCTAG_STATUS_OK) { break; }
 
         if(data_end - data < 6) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Variable attributes reply is too short!");

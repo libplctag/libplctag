@@ -44,13 +44,13 @@
 #include <stdlib.h>
 #include <time.h>
 #include <utils/atomic_utils.h>
+#include <utils/attr.h>
 #include <utils/backoff.h>
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 #include <utils/time_utils.h>
 
 /* Track active session handler threads for proper shutdown synchronization */
-static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
 
 #define MAX_REQUESTS (400)
 
@@ -200,124 +200,23 @@ static void unconnected_step(cip_conn_p session, struct session_sm_s *sm);
 
 
 static mutex_t session_mutex;
-static volatile vector_p sessions = NULL;
+static cip_conn_p sessions = NULL;
 
 
 int session_startup(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    if((rc = mutex_init(&session_mutex)) != PLCTAG_STATUS_OK) {
+    /* initialized once and never destroyed: a destructor that runs after shutdown still finds it. */
+    if(!session_mutex.initialized && (rc = mutex_init(&session_mutex)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
-    if((sessions = vector_create(25, 5)) == NULL) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unable to create session vector!");
-        return PLCTAG_ERR_NO_MEM;
-    }
+    sessions = NULL;
 
     return rc;
 }
 
-
-void session_teardown(void) {
-    int remaining_sessions = 0;
-    int64_t start_time = 0;
-    int64_t timeout_ms = 5000;
-    int active_count = 0;
-    int64_t elapsed = 0;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    /* flag all open sessions for termination */
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Marking all open sessions for termination.");
-
-    if(session_mutex.initialized) {
-        critical_block(&session_mutex) {
-            if(sessions == NULL) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session list is already destroyed.");
-
-                break;
-            }
-
-            remaining_sessions = vector_length(sessions);
-
-            for(int sess_index = 0; sess_index < remaining_sessions; sess_index++) {
-                cip_conn_p session = vector_get(sessions, sess_index);
-
-                if(session) { atomic_set_int32(&session->terminating, 1); }
-            }
-        }
-    }
-
-    /* flag the whole library shutting down. */
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Setting library shutdown flag.");
-
-    if(sessions && session_mutex.initialized) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Waiting for sessions to terminate.");
-
-        while(1) {
-            critical_block(&session_mutex) { remaining_sessions = vector_length(sessions); }
-
-            /* wait for things to terminate. */
-            if(remaining_sessions > 0) {
-                sleep_ms(50);  // MAGIC
-            } else {
-                break;
-            }
-        }
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Sessions all terminated.");
-
-        vector_destroy(sessions);
-
-        sessions = NULL;
-    }
-
-    /* Wait for all active session handler threads to complete.
-     * Use an atomic counter to track active handlers.
-     * Wait up to 5 seconds (5000 ms) with 20ms polling intervals.
-     */
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Waiting for session handler threads to complete.");
-    start_time = time_ms();
-
-    while((active_count = atomic_get_int32(&session_handlers_active)) > 0) {
-        elapsed = time_ms() - start_time;
-
-        if(elapsed >= timeout_ms) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Timeout waiting for %d session handler threads to complete.",
-                   active_count);
-            break;
-        }
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-               "Waiting for %d session handler threads to complete. Elapsed: %" PRId64 "ms", active_count, elapsed);
-        sleep_ms(20);
-    }
-
-    if(active_count == 0) { pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "All session handler threads completed."); }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Destroying session mutex.");
-
-    if(session_mutex.initialized) {
-        mutex_destroy(&session_mutex);
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-}
-
-
-/*
- * session_get_new_seq_id_unsafe
- *
- * A wrapper to get a new session sequence ID.  Not thread safe.
- *
- * Note that this is dangerous to use in threaded applications
- * because 32-bit processors will not implement a 64-bit
- * integer as an atomic entity.
- */
-
-uint64_t session_get_new_seq_id_unsafe(cip_conn_p session) { return session->session_seq_id++; }
 
 /*
  * session_get_new_seq_id
@@ -325,7 +224,7 @@ uint64_t session_get_new_seq_id_unsafe(cip_conn_p session) { return session->ses
  * A thread-safe function to get a new session sequence ID.
  */
 
-uint64_t session_get_new_seq_id(cip_conn_p session) {
+uint16_t session_get_new_seq_id(cip_conn_p session) {
     uint16_t res = 0;
 
     spin_block(&session->session_seq_id_lock) {
@@ -337,21 +236,6 @@ uint64_t session_get_new_seq_id(cip_conn_p session) {
     return res;
 }
 
-
-int session_get_max_payload(cip_conn_p session) {
-    int result = 0;
-
-    if(!session) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Called with null session pointer!");
-        return 0;
-    }
-
-    critical_block(&session->session_mutex) { result = session->max_payload_size; }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "max payload size is %d bytes.", result);
-
-    return result;
-}
 
 int session_get_available_cip_payload_space(cip_conn_p session) {
     int result = 0;
@@ -536,7 +420,8 @@ int add_session_unsafe(cip_conn_p session) {
 
     if(!session) { return PLCTAG_ERR_NULL_PTR; }
 
-    vector_set(sessions, vector_length(sessions), session);
+    session->next = sessions;
+    sessions = session;
 
     session->on_list = 1;
 
@@ -546,30 +431,15 @@ int add_session_unsafe(cip_conn_p session) {
 }
 
 
-int add_session(cip_conn_p s) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
-
-    critical_block(&session_mutex) { rc = add_session_unsafe(s); }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
-
-    return rc;
-}
-
-
 int remove_session_unsafe(cip_conn_p session) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
 
-    if(!session || !sessions) { return 0; }
+    if(!session) { return 0; }
 
-    for(int i = 0; i < vector_length(sessions); i++) {
-        cip_conn_p tmp = vector_get(sessions, i);
-
-        /* FIXME potential ABA problem here */
-        if(tmp == session) {
-            vector_remove(sessions, i);
+    for(cip_conn_p *link = &sessions; *link; link = &(*link)->next) {
+        if(*link == session) {
+            *link = session->next;
+            session->next = NULL;
             break;
         }
     }
@@ -621,12 +491,10 @@ int session_match_valid(const char *host, const char *path, cip_conn_p session) 
 
 
 cip_conn_p find_session_by_host_unsafe(const char *host, const char *path, int connection_group_id) {
-    for(int i = 0; i < vector_length(sessions); i++) {
-        cip_conn_p session = vector_get(sessions, i);
-
+    for(cip_conn_p entry = sessions; entry; entry = entry->next) {
         /* is this session in the process of destruction? */
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_inc: Acquiring session reference.");
-        session = rc_inc(session);
+        cip_conn_p session = rc_inc(entry);
         if(session) {
             if(session->connection_group_id == connection_group_id && session_match_valid(host, path, session)) {
                 return session;
@@ -1173,22 +1041,20 @@ void session_destroy(void *session_arg) {
 int session_add_request(cip_conn_p session, ab_request_p req) {
     int rc = PLCTAG_STATUS_OK;
 
+    if(!session || !req) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session or request is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", session, req);
 
+    /* the session's reference.  A request being destroyed cannot be queued. */
+    if(!rc_inc(req)) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Request is in the process of being deleted.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
     critical_block(&session->session_mutex) {
-        if(!session) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, req->tag_id, "Session is null!");
-            return PLCTAG_ERR_NULL_PTR;
-        }
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, req->tag_id, "rc_inc: Acquiring request reference.");
-        req = rc_inc(req);
-
-        if(!req) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Request is either null or in the process of being deleted.");
-            return PLCTAG_ERR_NULL_PTR;
-        }
-
         /* without the fragmented services an unbudgeted reply could overflow the packed reply. */
         {
             const cip_plc_type_t *plc = ab_plc_type_get(session->plc_type);
@@ -1260,23 +1126,28 @@ static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc
 }
 
 
+/* the ring's slots are read and written under session_mutex, so a lagging reader never sees half a slot. */
 static inline void session_publish_event(cip_conn_p session, int32_t event_type, int32_t status, int32_t reason) {
-    int32_t write_idx = atomic_get_int32(&session->conn_status_ring_write_idx);
+    bool published = false;
 
-    if(session->conn_status_ring[write_idx].event_type == event_type && session->conn_status_ring[write_idx].status == status) {
-        return;
+    critical_block(&session->session_mutex) {
+        int32_t write_idx = atomic_get_int32(&session->conn_status_ring_write_idx);
+
+        if(session->conn_status_ring[write_idx].event_type == event_type && session->conn_status_ring[write_idx].status == status) {
+            break;
+        }
+
+        write_idx = (write_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
+
+        session->conn_status_ring[write_idx].event_type = event_type;
+        session->conn_status_ring[write_idx].status = status;
+        session->conn_status_ring[write_idx].reason = reason;
+
+        atomic_set_int32(&session->conn_status_ring_write_idx, write_idx);
+        published = true;
     }
 
-    write_idx = (write_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
-
-    /* write data to the slot before publishing the new index */
-    session->conn_status_ring[write_idx].event_type = event_type;
-    session->conn_status_ring[write_idx].status = status;
-    session->conn_status_ring[write_idx].reason = reason;
-
-    /* atomic store acts as the release point; readers will not see this slot until after this */
-    atomic_set_int32(&session->conn_status_ring_write_idx, write_idx);
-    plc_tag_tickler_wake();
+    if(published) { plc_tag_tickler_wake(); }
 }
 
 
@@ -1447,9 +1318,8 @@ static int fo_step(cip_conn_p session, session_sm_t *sm) {
     if(resp->general_status != AB_EIP_OK) {
         uint16_t extended = (uint16_t)((status_size >= 4 && status[1] >= 1) ? (status[2] | (status[3] << 8)) : 0);
 
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Open failed: %s (0x%02x/0x%04x) -- %s",
-               decode_cip_error_short(status, status_size), resp->general_status, extended,
-               decode_cip_error_long(status, status_size));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Open failed: %s (0x%02x/0x%04x)",
+               decode_cip_error_short(status, status_size), resp->general_status, extended);
     }
 
     switch(classify_fo_reply(status, status_size, &offered)) {
@@ -1921,7 +1791,6 @@ THREAD_FUNC(session_handler) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting thread for session %p", session);
 
     /* Increment the count of active session handlers */
-    atomic_add_int32(&session_handlers_active, 1);
 
     while(!atomic_get_int32(&session->terminating) && atomic_get_bool(&lib_active)) {
         sm.now = time_ms();
@@ -1986,7 +1855,6 @@ THREAD_FUNC(session_handler) {
     critical_block(&session->session_mutex) { purge_aborted_requests_unsafe(session); }
 
     /* Decrement the count of active session handlers */
-    atomic_add_int32(&session_handlers_active, -1);
 
     THREAD_RETURN(0);
 }
@@ -2016,9 +1884,12 @@ int purge_aborted_requests_unsafe(cip_conn_p session) {
 
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session thread releasing aborted request %p.", request);
 
-            request->status = PLCTAG_ERR_ABORT;
-            request->request_size = 0;
-            request->resp_received = 1;
+            /* the same lock as every other hand-off, though the aborting tag has already let go. */
+            spin_block(&request->lock) {
+                request->status = PLCTAG_ERR_ABORT;
+                request->request_size = 0;
+                request->resp_received = 1;
+            }
 
             /* release our hold on it. */
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_dec: Releasing request reference.");
@@ -2054,8 +1925,7 @@ static int check_packed_reply(cip_conn_p session, req_batch_t *b) {
     if(multi_resp->status != AB_EIP_OK && multi_resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
         size_t status_size = cip_error_data_size(&multi_resp->status, session->data + session->data_size);
 
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received CIP error %s (%s).",
-               decode_cip_error_long(&multi_resp->status, status_size),
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received CIP error %s.",
                decode_cip_error_short(&multi_resp->status, status_size));
         return decode_cip_error_code(&multi_resp->status, status_size);
     }
@@ -2706,14 +2576,13 @@ int prepare_request(cip_conn_p session) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
-    encap = (eip_encap *)(session->data);
-    payload_size = (int)session->data_size - (int)sizeof(eip_encap);
-
-    /* FIXME - why is this check here? Haven't we checked this up the call chain? */
     if(!session) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Called with null session!");
         return PLCTAG_ERR_NULL_PTR;
     }
+
+    encap = (eip_encap *)(session->data);
+    payload_size = (int)session->data_size - (int)sizeof(eip_encap);
 
     /* fill in the fields of the request. */
 
@@ -3402,7 +3271,7 @@ int session_identify(cip_conn_p session, exchange_t *ex) {
             size_t status_size = cip_error_data_size(reply + 2, data_end);
 
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Identity request failed: %s",
-                   decode_cip_error_long(reply + 2, status_size));
+                   decode_cip_error_short(reply + 2, status_size));
             rc = decode_cip_error_code(reply + 2, status_size);
             break;
         }
@@ -3413,12 +3282,13 @@ int session_identify(cip_conn_p session, exchange_t *ex) {
         }
 
         /* vendor (2), device type (2), product code (2), revision (2), status (2), serial (4), name */
-        data = reply + sizeof(cip_header) + ((size_t)reply[3] * 2);
-
-        if((data_end - data) < 15) {
+        /* check the length before pointing past the additional status words. */
+        if((size_t)(data_end - reply) < sizeof(cip_header) + ((size_t)reply[3] * 2) + 15) {
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
+
+        data = reply + sizeof(cip_header) + ((size_t)reply[3] * 2);
 
         vendor_id = (uint16_t)(data[0] | (data[1] << 8));
         name_len = data[14];

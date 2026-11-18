@@ -161,11 +161,6 @@ int debug_module_get_level(debug_module_t module) {
 }
 
 
-void debug_set_all_modules(int level) {
-    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { atomic_set_int32(&debug_module_levels[i], level); }
-}
-
-
 static uint32_t get_thread_id(void) {
     if(!this_thread_num) {
         spin_block(&thread_num_lock) {

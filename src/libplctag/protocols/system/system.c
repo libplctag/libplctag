@@ -122,7 +122,6 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
      * in case we need to abort later.
      */
     tag->vtable = &system_tag_vtable;
-    tag->protocol_type = TAG_PROTOCOL_SYSTEM;
 
     /* set up the generic parts. */
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);

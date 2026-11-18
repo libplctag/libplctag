@@ -54,6 +54,11 @@ typedef struct lib_instance_t *lib_instance_p;
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
+/* a protocol's tag constructor.  src_tag is set by plc_tag_create_from_tag(). */
+typedef plc_tag_p (*tag_create_function)(attr attributes,
+                                         void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                         void *userdata, plc_tag_p src_tag);
+
 /*
  * Runtime attribute descriptors.  The core and each protocol publish a NULL-name-terminated
  * table.  Lookup is by name; the entry's type selects the live union branch.
@@ -147,15 +152,6 @@ struct tag_vtable_t {
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;
-
-typedef enum {
-    TAG_PROTOCOL_UNKNOWN = 0,
-    TAG_PROTOCOL_SYSTEM = 1,
-    TAG_PROTOCOL_AB = 2,
-    TAG_PROTOCOL_AB_CONNECTION = 3,
-    TAG_PROTOCOL_MODBUS = 4,
-    TAG_PROTOCOL_MB_CONNECTION = 6
-} tag_protocol_t;
 
 
 /* Shared connection event types — used by AB, Modbus, and Omron connection tags */
@@ -272,7 +268,11 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int32_t tag_id;                          \
     int connection_group_id;                 \
     int bit;                                 \
-    int protocol_type;                       \
+    /* the tag's connection (CIP session or Modbus PLC), NULL if it has none.  The protocol's   \
+     * own field holds the reference; this is a copy for plc_tag_create_from_tag(), which  \
+     * passes the source tag to create_func.  Set once during create. */                   \
+    void *conn;                              \
+    tag_create_function create_func;         \
     atomic_bool abort_requested;             \
     /* Read by tag_tickler_func() under the global tag_lookup_mutex, while every other  \
      * field below is written under this tag's own per-tag api_mutex -- a different     \
@@ -288,6 +288,8 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     uint8_t abort_count;                     \
     int8_t status;                           \
     uint8_t allow_field_resize : 1;          \
+    /* holds PLC data, so destroy_idle_sec applies. */ \
+    uint8_t can_auto_destroy : 1;            \
     /* CREATED is queued and not yet delivered. */ \
     uint8_t event_creation_complete : 1;     \
     uint8_t event_read_complete_enable : 1;  \
@@ -335,8 +337,7 @@ extern void lib_instance_publish(void);
 extern void lib_instance_discard_pending(void);
 
 /* tags that hold PLC data; system and connection tags cannot be auto-destroyed. */
-#define tag_can_auto_destroy(tag)                                                                              \
-    ((tag)->protocol_type == TAG_PROTOCOL_AB || (tag)->protocol_type == TAG_PROTOCOL_MODBUS)
+#define tag_can_auto_destroy(tag) ((tag)->can_auto_destroy)
 
 /* zero, or at least this many seconds. */
 #define TAG_AUTO_DESTROY_MIN_SEC (10)

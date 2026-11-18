@@ -98,30 +98,6 @@ typedef SSIZE_T ssize_t;
 #endif
 
 
-#ifndef COUNT_NARG
-#    define COUNT_NARG(...) COUNT_NARG_(__VA_ARGS__, COUNT_RSEQ_N())
-#endif
-
-#ifndef COUNT_NARG_
-#    define COUNT_NARG_(...) COUNT_ARG_N(__VA_ARGS__)
-#endif
-
-#ifndef COUNT_ARG_N
-#    define COUNT_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22,     \
-                        _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43, \
-                        _44, _45, _46, _47, _48, _49, _50, _51, _52, _53, _54, _55, _56, _57, _58, _59, _60, _61, _62, _63, N,   \
-                        ...)                                                                                                     \
-        N
-#endif
-
-#ifndef COUNT_RSEQ_N
-#    define COUNT_RSEQ_N()                                                                                                       \
-        63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34,  \
-            33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, \
-            2, 1, 0
-#endif
-
-
 /* memory functions/defs */
 extern void *mem_alloc(int32_t size);
 extern void *mem_realloc(void *orig, int32_t size);
@@ -130,7 +106,6 @@ extern void mem_set(void *d1, int c, int32_t size);
 extern void mem_copy(void *dest, void *src, int32_t size);
 extern int32_t mem_copy_bounded(void *dest, int32_t dest_capacity, void *src, int32_t size);
 extern void mem_move(void *dest, void *src, int32_t size);
-extern int mem_cmp(void *src1, int32_t src1_size, void *src2, int32_t src2_size);
 
 /*
  * Standard library calls whose names differ between platforms.  The portable
@@ -149,10 +124,7 @@ extern int str_copy(char *dst, int dst_size, const char *src);
 extern int str_length(const char *str);
 extern char *str_dup(const char *str);
 extern int str_to_int(const char *str, int *val);
-extern int str_to_float(const char *str, float *val);
 extern char **str_split(const char *str, const char *sep);
-#define str_concat(s1, ...) str_concat_impl(COUNT_NARG(__VA_ARGS__) + 1, s1, __VA_ARGS__)
-extern char *str_concat_impl(int num_args, ...);
 
 /* mutex functions/defs */
 /*
@@ -213,10 +185,7 @@ typedef struct thread_t *thread_p;
 // typedef PTHREAD_START_ROUTINE thread_func_t;
 // typedef DWORD /*WINAPI*/ (*thread_func_t)(void *lpParam );
 extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg);
-extern void thread_stop(void);
-extern void thread_kill(thread_p t);
 extern int thread_join(thread_p t);
-extern int thread_detach();
 extern int thread_destroy(thread_p *t);
 
 #define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)

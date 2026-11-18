@@ -92,6 +92,36 @@ static int encode_n(int n, int needs_connection, int *size) {
 }
 
 
+/* an IP address port segment: port 18, length, the address as text, a pad to an even length. */
+static void test_ip_addr_segment(void **state) {
+    static const uint8_t want[] = {0x01, 0x00, 0x12, 0x09, '1', '0', '.', '1', '.', '2', '.', '3', '4', 0x00, 0x01, 0x00};
+    uint8_t buf[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
+    int needs_connection = 1;
+    int is_dhp = 0;
+    uint16_t dhp_dest = 0;
+    int size = (int)sizeof(buf);
+
+    (void)state;
+
+    assert_int_equal(cip_encode_path("1,0,18,10.1.2.34,1,0", &needs_connection, AB_PLC_LGX, buf, &size, &is_dhp, &dhp_dest),
+                     PLCTAG_STATUS_OK);
+    /* a connected path then gets the Message Router, which test_path_fits_8_bits covers. */
+    assert_true(size >= (int)sizeof(want));
+    assert_int_equal(memcmp(buf, want, sizeof(want)), 0);
+
+    /* an octet over 255, a missing octet, and a run of digits long enough to overflow an int. */
+    size = (int)sizeof(buf);
+    assert_int_equal(cip_encode_path("18,10.1.2.256", &needs_connection, AB_PLC_LGX, buf, &size, &is_dhp, &dhp_dest),
+                     PLCTAG_ERR_BAD_PARAM);
+    size = (int)sizeof(buf);
+    assert_int_equal(cip_encode_path("18,10..2.3", &needs_connection, AB_PLC_LGX, buf, &size, &is_dhp, &dhp_dest),
+                     PLCTAG_ERR_BAD_PARAM);
+    size = (int)sizeof(buf);
+    assert_int_equal(cip_encode_path("18,99999999999999.1.2.3", &needs_connection, AB_PLC_LGX, buf, &size, &is_dhp, &dhp_dest),
+                     PLCTAG_ERR_BAD_PARAM);
+}
+
+
 static void test_path_fits_8_bits(void **state) {
     int size = 0;
 
@@ -135,11 +165,30 @@ static void test_dhp_shares_connection(void **state) {
 }
 
 
+/*
+ * Step 1.8: the session list lock lives for the process, so a session destructor that runs after
+ * plc_tag_shutdown(), from a reference held across it, still finds the lock.
+ */
+static void test_session_lock_outlives_shutdown(void **state) {
+    int32_t id = plc_tag_create("protocol=system&name=version", 0);
+
+    (void)state;
+
+    assert_true(id > 0);
+    plc_tag_destroy(id);
+    plc_tag_shutdown();
+
+    assert_true(session_mutex.initialized);
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_forward_close_header),
         cmocka_unit_test(test_path_fits_8_bits),
+        cmocka_unit_test(test_ip_addr_segment),
         cmocka_unit_test(test_dhp_shares_connection),
+        cmocka_unit_test(test_session_lock_outlives_shutdown),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

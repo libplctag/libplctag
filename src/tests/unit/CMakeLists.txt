@@ -43,7 +43,7 @@ set(MOCK_DEFINITIONS
 
 # target_compile_definitions(test_init PRIVATE ${MOCK_DEFINITIONS})
 
-# test_platform_str: tests str_to_int()/str_to_float() in the platform shim.
+# test_platform_str: tests str_to_int() in the platform shim.
 # No mocks, so no MOCK_DEFINITIONS -- it links and calls the real functions.
 add_executable(test_platform_str test_platform_str.c)
 
@@ -168,16 +168,17 @@ target_include_directories(test_byte_buffer PRIVATE
 
 target_link_libraries(test_byte_buffer PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
-# add_executable(test_udt_size test_udt_size.c)
+# test_udt_size: R4, the UDT field definition size from the PLC's word count.
+add_executable(test_udt_size test_udt_size.c)
 
-# target_include_directories(test_udt_size PRIVATE
-#     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
-#     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
-#     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-#     ${PLATFORM_SHIM_PATH}
-# )
+target_include_directories(test_udt_size PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
 
-# target_link_libraries(test_udt_size PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+target_link_libraries(test_udt_size PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
 # add_executable(test_tag_schedule test_tag_schedule.c)
 
@@ -213,6 +214,36 @@ target_include_directories(test_debug_limit PRIVATE
 )
 
 target_link_libraries(test_debug_limit PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+# test_lib_safety: API safety in lib.c (review C1, C4, C6, C7, C8).  Compiles lib.c in to hook
+# rc_dec() and mem_free().
+add_executable(test_lib_safety test_lib_safety.c)
+
+target_include_directories(test_lib_safety PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_lib_safety PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+add_test(NAME unit_test_lib_safety COMMAND test_lib_safety)
+
+# test_modbus_safety: Modbus create and destroy safety (review M1, M2).  Compiles modbus.c in
+# to fail vector_create() on demand.
+add_executable(test_modbus_safety test_modbus_safety.c)
+
+target_include_directories(test_modbus_safety PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_modbus_safety PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+add_test(NAME unit_test_modbus_safety COMMAND test_modbus_safety)
 
 # test_eip_response_validation: checks that a response whose EIP header does not answer the
 # request we sent is rejected. It uses POSIX sockets directly to stand up a hostile server,
@@ -270,6 +301,11 @@ if(NOT WIN32)
     add_test(NAME unit_test_socket_high_fd COMMAND test_socket_high_fd)
 
     set(EXTRA_UNIT_TESTS ${EXTRA_UNIT_TESTS} test_socket_high_fd)
+
+    # unit_test_exported_symbols: the static library defines no global internal data a user
+    # program could collide with (review M3).  Uses nm, so POSIX only.
+    add_test(NAME unit_test_exported_symbols
+             COMMAND sh -c "! nm -g '$<TARGET_FILE:plctag_static>' | grep -E ' [BDCS] _?(mb_mutex|plcs|modbus_tag_byte_order)$'")
 endif()
 
 # test_cip_status: the CIP error status prefix parser and the status codes the Forward Open
@@ -324,7 +360,7 @@ add_test(NAME unit_test_conn_path_fc COMMAND test_conn_path_fc)
 # add_test(NAME unit_test_backoff COMMAND test_backoff)
 add_test(NAME unit_test_byte_slice COMMAND test_byte_slice)
 add_test(NAME unit_test_byte_buffer COMMAND test_byte_buffer)
-# add_test(NAME unit_test_udt_size COMMAND test_udt_size)
+add_test(NAME unit_test_udt_size COMMAND test_udt_size)
 # add_test(NAME unit_test_tag_schedule COMMAND test_tag_schedule)
 # add_test(NAME unit_test_tag_registry COMMAND test_tag_registry)
 add_test(NAME unit_test_debug_limit COMMAND test_debug_limit)
@@ -332,7 +368,7 @@ add_test(NAME unit_test_debug_limit COMMAND test_debug_limit)
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
 # DISABLED until rolled-back code returns: DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_byte_buffer test_udt_size test_tag_schedule test_tag_registry test_debug_limit test_cip_status ${EXTRA_UNIT_TESTS}
-    DEPENDS test_platform_str test_fo_classify test_tag_name_bounds test_byte_slice test_byte_buffer test_debug_limit test_bounded_copy test_conn_path_fc ${EXTRA_UNIT_TESTS}
+    DEPENDS test_platform_str test_fo_classify test_tag_name_bounds test_byte_slice test_byte_buffer test_debug_limit test_bounded_copy test_conn_path_fc test_udt_size test_lib_safety test_modbus_safety ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

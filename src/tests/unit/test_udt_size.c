@@ -37,12 +37,12 @@
  * 32-bit words, and 4 * words - 23 underflowed for words < 6, asking for about 65,000 bytes.
  *
  * udt_fields_size() is static, so the file is compiled in here.  Its other symbols then come
- * from this object, and the archive's copy of udt_tag.o is never pulled in.
+ * from this object, and the archive's copy of eip_cip_special.o is never pulled in.
  */
 
 #include "mini_mock.h"
 
-#include "../../libplctag/modules/ab/udt_tag.c"
+#include "../../libplctag/protocols/ab/eip_cip_special.c"
 
 
 static void test_too_few_words_is_refused(void **state) {

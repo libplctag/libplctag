@@ -203,26 +203,6 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
 
 
 /*
- * thread_stop()
- *
- * Stop the current thread.  Does not take arguments.  Note: the thread
- * ends completely and this function does not return!
- */
-void thread_stop(void) { ExitThread((DWORD)0); }
-
-
-/*
- * thread_kill()
- *
- * Stop the indicated thread completely.
- */
-
-void thread_kill(thread_p t) {
-    if(t) { TerminateThread(t->h_thread, (DWORD)0); }
-}
-
-
-/*
  * thread_join()
  *
  * Wait for the argument thread to stop and then continue.
@@ -244,19 +224,6 @@ int thread_join(thread_p t) {
     }
 
     /*pdebug("Done.");*/
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/*
- * thread_detach
- *
- * Detach the thread.  You cannot call thread_join on a detached thread!
- */
-
-extern int thread_detach() {
-    /* FIXME - it does not look like you can do this on Windows??? */
 
     return PLCTAG_STATUS_OK;
 }

@@ -166,17 +166,14 @@ void destroy_modules(void) {
         return;
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down AB module.");
-    ab_teardown();
-
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
-    mb_teardown();
-
-    /* Drain deferred destructors (refcount cleanup) BEFORE tearing down the library
-     * module: those destructors run tag teardown that touches the tag table, lookup
-     * mutex and tickler condvar which lib_teardown() destroys, so the refcount cleanup
-     * thread must be stopped and its queue drained while those are still alive. */
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
+    /*
+     * The one wait, with no timeout: every queued destructor runs, and a connection's destructor
+     * joins its handler thread.  Handlers stop on lib_active, so nothing needs a signal first.
+     * The AB and Modbus modules keep no state to free; their list locks live for the process,
+     * so a destructor that runs later, from a reference held across shutdown, still finds them.
+     * The tag registry goes after this, since tag destructors use it.
+     */
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Running deferred destructors.");
     refcount_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");

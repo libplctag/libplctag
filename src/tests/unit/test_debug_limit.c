@@ -61,7 +61,7 @@ static void count_line(int32_t tag_id, int debug_level, const char *message) {
 
 static void setup(void) {
     lines = 0;
-    debug_set_all_modules(DEBUG_DETAIL);
+    set_debug_level(DEBUG_DETAIL);
     assert_int_equal(debug_register_logger(count_line), PLCTAG_STATUS_OK);
 }
 

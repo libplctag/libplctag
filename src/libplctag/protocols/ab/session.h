@@ -95,8 +95,8 @@ typedef struct session_conn_status_entry_s {
 
 
 struct cip_conn_t {
-    //    int status;
     int on_list;
+    struct cip_conn_t *next; /* the global session list, under the module's session_mutex. */
 
     /* gateway connection related info */
     char *host;
@@ -228,16 +228,14 @@ struct ab_request_t {
 };
 
 
-uint64_t session_get_new_seq_id_unsafe(cip_conn_p sess);
-uint64_t session_get_new_seq_id(cip_conn_p sess);
+/* the next PCCC TNS: 16 bits, never 0. */
+uint16_t session_get_new_seq_id(cip_conn_p sess);
 
 extern int session_startup(void);
-extern void session_teardown(void);
 
 extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new_session);
 /* true when an identified connection is connected and the tag asks for unconnected, or the reverse. */
 extern bool session_connected_conflicts(cip_conn_p session, int use_connected_msg);
-extern int session_get_max_payload(cip_conn_p session);
 extern int session_get_available_cip_payload_space(cip_conn_p session);
 extern int session_create_request(cip_conn_p session, int tag_id, ab_request_p *request);
 extern int session_add_request(cip_conn_p sess, ab_request_p req);

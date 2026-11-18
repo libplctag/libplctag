@@ -62,7 +62,6 @@
 #define OMRON_CLASS_TAG_NAME_SERVER ((uint8_t)0x6A)
 #define OMRON_CLASS_VARIABLE_TYPE ((uint8_t)0x6C)
 #define CIP_SYMBOLIC_SEGMENT ((uint8_t)0x91)
-#define CIP_REPLY_FLAG ((uint8_t)0x80)
 
 #define OMRON_TYPE_STRUCT ((uint8_t)0xA2)
 #define OMRON_TYPE_ABBREV_STRUCT ((uint8_t)0xA0)
@@ -112,8 +111,8 @@ typedef struct {
     uint32_t nesting_id;
 } omron_vto_t;
 
-static int omron_special_read_start(ab_tag_p tag);
-static int omron_special_tickler(ab_tag_p tag);
+static int omron_special_read_start(plc_tag_p tag_arg);
+static int omron_special_tickler(plc_tag_p tag_arg);
 static int send_next_request(ab_tag_p tag);
 static int32_t encode_listing_request(ab_tag_p tag, uint8_t *dest);
 static int32_t encode_udt_request(ab_tag_p tag, uint8_t *dest);
@@ -128,10 +127,10 @@ static void reset_read(ab_tag_p tag);
 static uint32_t get_u32(const uint8_t *data);
 
 static struct tag_vtable_t omron_special_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
-    .read = (tag_vtable_func)omron_special_read_start,
-    .status = (tag_vtable_func)ab_tag_status,
-    .tickler = (tag_vtable_func)omron_special_tickler,
+    .abort = ab_tag_vtable_abort,
+    .read = omron_special_read_start,
+    .status = ab_tag_status,
+    .tickler = omron_special_tickler,
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
@@ -206,7 +205,8 @@ int omron_setup_udt_tag(ab_tag_p tag, const char *name) {
 }
 
 
-static int omron_special_read_start(ab_tag_p tag) {
+static int omron_special_read_start(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
 
     if(tag->write_in_progress) {
@@ -233,7 +233,8 @@ static int omron_special_read_start(ab_tag_p tag) {
 }
 
 
-static int omron_special_tickler(ab_tag_p tag) {
+static int omron_special_tickler(plc_tag_p tag_arg) {
+    ab_tag_p tag = (ab_tag_p)tag_arg;
     int rc = check_request_status(tag);
 
     if(rc != PLCTAG_STATUS_OK) { return rc; }
@@ -379,7 +380,6 @@ static int32_t encode_udt_request(ab_tag_p tag, uint8_t *dest) {
 
 /* OK when the read is done, PENDING when there is another request to send, or an error. */
 static int decode_reply(ab_tag_p tag) {
-    cip_header *cip_resp = (cip_header *)(tag->req->data);
     uint8_t *data = tag->req->data + sizeof(cip_header);
     uint8_t *data_end = tag->req->data + tag->req->request_size;
     int32_t data_size = (int32_t)(data_end - data);
@@ -390,19 +390,8 @@ static int decode_reply(ab_tag_p tag) {
 
     if(data_size < 0) { return PLCTAG_ERR_TOO_SMALL; }
 
-    if(cip_resp->reply_service != (service | CIP_REPLY_FLAG)) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: 0x%02x",
-               cip_resp->reply_service);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(cip_resp->status != AB_CIP_STATUS_OK) {
-        size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-               decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-        return decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-    }
+    rc = cip_check_reply(tag->tag_id, tag->req->data, data_end, service, NULL);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(!is_udt) {
         return (tag->udt_get_fields == OMRON_LIST_TYPES) ? decode_variable_attributes(tag, data, data_size)

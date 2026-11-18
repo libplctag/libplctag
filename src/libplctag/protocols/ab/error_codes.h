@@ -33,12 +33,19 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 extern const char *decode_cip_error_short(uint8_t *data, size_t data_size);
-extern const char *decode_cip_error_long(uint8_t *data, size_t data_size);
 extern int decode_cip_error_code(uint8_t *data, size_t data_size);
+
+/*
+ * Check a CIP reply header: the reply service for the request's service, then the general
+ * status.  With partial NULL a fragment status is an error; otherwise *partial says whether
+ * more data follows.
+ */
+extern int cip_check_reply(int32_t tag_id, uint8_t *reply, uint8_t *reply_end, uint8_t service, bool *partial);
 
 /* what a Forward Open reply means for the next attempt.  The same for every PLC: CIP defines it. */
 typedef enum {

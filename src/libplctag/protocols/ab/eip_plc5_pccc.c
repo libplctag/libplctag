@@ -34,12 +34,12 @@
 #include <libplctag/protocols/ab/tag.h>
 
 
-struct tag_vtable_t plc5_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
-                                   .read = (tag_vtable_func)pccc_tag_read_start,
-                                   .status = (tag_vtable_func)pccc_tag_status,
-                                   .tickler = (tag_vtable_func)pccc_tag_tickler,
-                                   .write = (tag_vtable_func)pccc_tag_write_start,
-                                   .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
+struct tag_vtable_t plc5_vtable = {.abort = ab_tag_vtable_abort, /* shared */
+                                   .read = pccc_tag_read_start,
+                                   .status = pccc_tag_status,
+                                   .tickler = pccc_tag_tickler,
+                                   .write = pccc_tag_write_start,
+                                   .wake_plc = NULL, /* wake_plc */
 
                                    /* data accessors */
                                    .attribs = ab_attribs};

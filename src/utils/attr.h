@@ -65,4 +65,3 @@ extern attr attr_copy(attr src);
  * A min_value above max_value is a caller error: the value ends up at max_value, so a bad
  * range shows up as a clamped value rather than letting anything through.
  */
-extern bool attr_clamp_int32(int32_t *value, int32_t min_value, int32_t max_value);

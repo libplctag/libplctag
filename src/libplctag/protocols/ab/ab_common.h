@@ -50,8 +50,10 @@ typedef struct ab_request_t *ab_request_p;
 
 extern int ab_tag_abort_request_only(ab_tag_p tag);
 extern int ab_tag_abort_request(ab_tag_p tag);
+/* ab_tag_abort_request() with the vtable signature. */
+extern int ab_tag_vtable_abort(plc_tag_p tag);
 extern int ab_tag_abort(ab_tag_p tag);
-extern int ab_tag_status(ab_tag_p tag);
+extern int ab_tag_status(plc_tag_p tag_arg);
 
 
 /* Runtime attributes shared by every AB tag type. */

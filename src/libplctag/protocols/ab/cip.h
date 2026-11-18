@@ -50,6 +50,5 @@ extern int cip_encode_tag_name(ab_tag_p tag, const char *name);
 extern int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size);
 
 /* look up the element size in bytes based on the first byte */
-extern int cip_lookup_data_element_size(uint8_t type_byte, int *element_size);
 
 #endif

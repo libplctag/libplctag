@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include "connection_tag.h"
+#include <libplctag/protocols/ab/ab.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/ab/tag.h>
@@ -98,7 +99,6 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
 
     /* set the vtable to the device tag vtable. */
     tag->vtable = &connection_tag_vtable;
-    tag->protocol_type = TAG_PROTOCOL_AB_CONNECTION;
 
     /* set up the generic parts. */
     int32_t rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
@@ -113,13 +113,7 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
     int new_session = 0;
 
     if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB: tag->session = rc_inc(((ab_tag_p)src_tag)->session); break;
-
-            case TAG_PROTOCOL_AB_CONNECTION: tag->session = rc_inc(((ab_connection_tag_p)src_tag)->session); break;
-
-            default: tag->session = NULL; break;
-        }
+        tag->session = rc_inc((cip_conn_p)src_tag->conn);
 
         if(!tag->session) {
             pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_WARN, 0, "Unable to reuse source session.");
@@ -135,6 +129,9 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
             return (plc_tag_p)tag;
         }
     }
+
+    tag->conn = tag->session;
+    tag->create_func = ab_tag_create;
 
     if(new_session) {
         /* We just created this session (session_find_or_create() initializes
@@ -221,16 +218,21 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
         }
     }
 
-    /* a full event queue leaves the rest for the next pass. */
-    while(read_idx != write_idx) {
-        int32_t next_idx = (read_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
-        int32_t event_type = conn_tag->session->conn_status_ring[next_idx].event_type;
+    /* a full event queue leaves the rest for the next pass.  session_mutex: see session_publish_event(). */
+    critical_block(&conn_tag->session->session_mutex) {
+        while(read_idx != write_idx) {
+            int32_t next_idx = (read_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
+            int32_t event_type = conn_tag->session->conn_status_ring[next_idx].event_type;
 
-        if(!tag_push_conn_event(raw_tag, event_type, conn_tag->session->conn_status_ring[next_idx].status, conn_tag->io_events)) { break; }
+            if(!tag_push_conn_event(raw_tag, event_type, conn_tag->session->conn_status_ring[next_idx].status,
+                                    conn_tag->io_events)) {
+                break;
+            }
 
-        if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) { conn_tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET; }
+            if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) { conn_tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET; }
 
-        read_idx = next_idx;
+            read_idx = next_idx;
+        }
     }
 
     conn_tag->status_ring_read_idx = read_idx;

@@ -39,7 +39,6 @@
 #    include <libplctag/lib/tag.h>
 #    include <utils/attr.h>
 
-void ab_teardown(void);
 int ab_init(void);
 plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                         void *userdata, plc_tag_p src_tag);
