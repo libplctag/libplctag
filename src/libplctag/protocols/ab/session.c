@@ -151,7 +151,7 @@ static cip_conn_p session_create_unsafe(int max_payload_capacity, const char *ho
                                           const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
 static int add_session_unsafe(cip_conn_p n);
 static int remove_session_unsafe(cip_conn_p n);
-static cip_conn_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
+static cip_conn_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id, int use_connected_msg);
 static int session_match_valid(const char *host, const char *path, cip_conn_p session);
 // static int session_add_request_unsafe(cip_conn_p session, ab_request_p req);
 static int session_open_socket(cip_conn_p session);
@@ -322,7 +322,8 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
     critical_block(&session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
         if(shared_session) {
-            session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id);
+            /* a tag that names its PLC says how it messages; one that does not takes whatever identify finds. */
+            session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id, plc ? use_connected_msg : -1);
         } else {
             /* no sharing, create a new one */
             session = CIP_CONN_NULL;
@@ -359,13 +360,6 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
 
                 new_session = 1;
             }
-        } else if(plc && session_connected_conflicts(session, use_connected_msg)) {
-            /* a connection is either connected or not; a tag asking for the other cannot share it. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "use_connected_msg=%d conflicts with the connection's %d!",
-                   use_connected_msg, session->use_connected_msg);
-            rc_dec(session);
-            session = CIP_CONN_NULL;
-            rc = PLCTAG_ERR_BAD_PARAM;
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Reusing existing session.");
         }
@@ -490,13 +484,27 @@ int session_match_valid(const char *host, const char *path, cip_conn_p session) 
 }
 
 
-cip_conn_p find_session_by_host_unsafe(const char *host, const char *path, int connection_group_id) {
+/*
+ * use_connected_msg is 0 or 1 to match only a connection that messages the same way, or -1 for any.
+ * A connection is either connected or not, so a connected tag does not match an unconnected one.
+ */
+cip_conn_p find_session_by_host_unsafe(const char *host, const char *path, int connection_group_id, int use_connected_msg) {
     for(cip_conn_p entry = sessions; entry; entry = entry->next) {
         /* is this session in the process of destruction? */
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_inc: Acquiring session reference.");
         cip_conn_p session = rc_inc(entry);
         if(session) {
-            if(session->connection_group_id == connection_group_id && session_match_valid(host, path, session)) {
+            bool messaging_matches = true;
+
+            if(use_connected_msg >= 0) {
+                /* identify can change it; a DH+ route is always connected, whatever the tag's PLC defaults to. */
+                critical_block(&session->session_mutex) {
+                    messaging_matches = session->is_dhp || ((use_connected_msg != 0) == (session->use_connected_msg != 0));
+                }
+            }
+
+            if(session->connection_group_id == connection_group_id && session_match_valid(host, path, session)
+               && messaging_matches) {
                 return session;
             }
 
