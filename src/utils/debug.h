@@ -58,8 +58,15 @@ extern int debug_module_get_level(debug_module_t module);
 
 extern bool debug_is_enabled(debug_module_t module, int level);
 
+/* lets GCC and Clang check every log call's format string against its arguments. */
+#if defined(__GNUC__)
+#    define PDEBUG_FORMAT_ATTR __attribute__((format(printf, 6, 7)))
+#else
+#    define PDEBUG_FORMAT_ATTR
+#endif
+
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
-                        ...);
+                        ...) PDEBUG_FORMAT_ATTR;
 
 #if defined(_WIN32) && defined(_MSC_VER)
 /* MinGW on Windows does not need this. */
