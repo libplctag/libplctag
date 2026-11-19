@@ -180,7 +180,7 @@ REQUIRED_EXECUTABLES = [
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
     "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy", "test_find_or_create_tag",
-    "test_tag_listing_reread", "test_create_fail_callback",
+    "test_tag_listing_reread", "test_create_fail_callback", "perf_benchmark",
 ]
 
 
@@ -538,6 +538,13 @@ def build_manifest() -> list[Test]:
         test("bundled reads of several ordinary tags",
              group="stress", cmd=[exe("thread_stress"), "4",
               f"protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray"]),
+        # Connection count ramp (must-do item 6): where adding connections stops helping.  The
+        # curve is logged, not judged; it fails only on errors or a run with no reads.  Holds the
+        # whole chassis so other tests do not bend the curve.
+        test("connection count ramp, 1 to 8 connections",
+             group="stress", cmd=[sys.executable, str(Path(__file__).resolve().with_name("run_connection_ramp.py")),
+              exe("perf_benchmark"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]"]),
         # Writing a tag the caller never read: the library fetches the type itself first.
         test("write before read",
              [exe("test_write_before_read"),

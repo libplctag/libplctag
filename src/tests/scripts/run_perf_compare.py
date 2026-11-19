@@ -40,7 +40,7 @@ Usage:
   run_perf_compare.py --self-check
 
 CPU over each client's measured window: server process, machine total (all cores, so up to
-cores x 100 %), and the busiest client and server thread.  "limit" names what ran out first:
+cores x 100 %; Linux only, blank on macOS), and the busiest client and server thread.  "limit" names what ran out first:
 machine, server or client (busiest thread at 90 % of a core or more).  Linux reads /proc,
 macOS uses ps.
 """
@@ -230,7 +230,7 @@ def stop_server(proc, log):
 
 CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 CORES = os.cpu_count() or 1
-PS_TIME = re.compile(r"^(?:\d+-)?(?:\d+:)*\d+\.\d+$")
+PS_TIME = re.compile(r"^(?:\d+-)?(?:\d+:)+\d+\.\d+$")  # at least one colon, so %CPU (19.9) is not a time
 
 
 def stat_seconds(text):
@@ -272,14 +272,15 @@ def thread_seconds(pid):
 
 
 def machine_seconds():
-    """Busy CPU seconds summed over all cores since boot (Linux) or over all live processes (macOS)."""
+    """Busy CPU seconds summed over all cores since boot (Linux); None elsewhere."""
     try:
         with open("/proc/stat") as f:
             ticks = [int(x) for x in f.readline().split()[1:9]]
         return (sum(ticks) - ticks[3] - ticks[4]) / CLK_TCK  # minus idle and iowait
     except OSError:
-        out = subprocess.run(["ps", "-A", "-o", "time="], capture_output=True, text=True).stdout.split()
-        return sum(cpu_seconds_text(w) for w in out)
+        # ponytail: no machine total on macOS.  Summing ps -A gains or loses the whole lifetime
+        # CPU of any process that starts or exits in the window.  host_processor_info if needed.
+        return None
 
 
 def busiest_thread_pct(before, after, seconds):
@@ -348,12 +349,12 @@ def run_one(binary, c, args, server):
         start, end = whole, sample()
     dt = end["t"] - start["t"]
     server_pct = 100.0 * (end["srv"] - start["srv"]) / dt if server and dt > 0 else 0.0
-    machine_pct = 100.0 * (end["machine"] - start["machine"]) / dt if dt > 0 else 0.0
+    machine_pct = 100.0 * (end["machine"] - start["machine"]) / dt if dt > 0 and start["machine"] is not None else ""
     thr = thr_end if thr_end else end
     cli_thread = busiest_thread_pct(start["cli_threads"], thr["cli_threads"], thr["t"] - start["t"])
     srv_thread = busiest_thread_pct(start["srv_threads"], thr["srv_threads"], thr["t"] - start["t"])
     cpu = dict(machine_cpu_pct=machine_pct, client_max_thread_pct=cli_thread, server_max_thread_pct=srv_thread,
-               limit=limit(machine_pct, cli_thread, srv_thread))
+               limit=limit(machine_pct or 0.0, cli_thread, srv_thread))
     lines = [l.rstrip("\n") for l in stdout if l.startswith(c["mode"] + ",")]
     if proc.returncode != 0 or not lines:
         print(f"  FAILED rc={proc.returncode}: {' '.join(cmd)}\n{stderr[-2000:]}", file=sys.stderr)
@@ -398,7 +399,7 @@ def self_check():
     assert busiest_thread_pct({"1": 1.0, "2": 0.0}, {"1": 1.5, "2": 0.9, "3": 0.2}, 1.0) == 90.0
     assert limit(SERVER_BOUND_PCT * CORES, 0, 0) == "machine" and limit(10, 95, 99) == "server"
     assert limit(10, 95, 10) == "client" and limit(10, 10, 10) == ""
-    assert PS_TIME.match("0:00.01") and not PS_TIME.match("31T")
+    assert PS_TIME.match("0:00.01") and not PS_TIME.match("31T") and not PS_TIME.match("19.9")
     assert DELAY_LINE.findall("x Response delay: requested 300 us, applied mean 412 us over 9 responses.")[-1] == ("300", "412", "9")
     assert len(thread_sweep_matrix("logix", 0.3, (1, 2), (1, 10))) == 2 * 2 * (1 + 2) * 2
     assert config_key(thread_sweep_matrix("logix", 0.3, (1,), (1,))[0]).startswith("logix d0.3ms ")

@@ -47,9 +47,16 @@
  *
  * Values are written to the first 4 bytes of each element, so an element of any size works.
  *
+ * --registers names tag i <name><i>, one 16-bit Modbus register (hr0, hr1, ...), and writes and
+ * checks 16-bit values.  --arrays has no effect then.
+ *
+ * When liballoc_count is loaded into the process (src/tests/alloc_count), its counts are marked
+ * at "create start", "create end", "reads start" and "reads end".
+ *
  * Usage:
  *   test_many_tags --tag=BASE --name=PREFIX --tags=N [--groups=G] [--threads=T] [--arrays=K]
  *                  [--max-create-ms=M] [--passes=R] [--read-s=S] [--idle-s=S] [--max-idle-cpu-pct=P]
+ *                  [--registers]
  * BASE is a tag string without name and connection_group_id.  --max-create-ms fails the test
  * if creating all the tags takes longer.
  *
@@ -77,6 +84,7 @@
 #include <time.h>
 
 #ifdef POSIX_PLATFORM
+#    include <dlfcn.h>
 #    include <sys/resource.h>
 #endif
 
@@ -106,6 +114,8 @@ static int32_t num_tags = 0;
 static int32_t num_groups = 1;
 static int32_t num_threads = 1;
 static int32_t num_arrays = 0;
+static bool registers = false;
+static void (*mark_fn)(const char *label) = NULL; /* set only when liballoc_count is loaded */
 static int32_t *tags = NULL;
 static uint32_t seed = 0;
 static compat_atomic_int32_t reported = {0};
@@ -115,6 +125,24 @@ static int32_t run_phase(phase_t phase, int64_t *elapsed_us);
 
 
 static int64_t now_ms(void) { return compat_time_ms(); }
+
+
+static void mark(const char *label) {
+    if(mark_fn) { mark_fn(label); }
+}
+
+
+/* Found once, before any counted phase, so the lookup's own allocations are not counted. */
+static void find_alloc_count_mark(void) {
+#ifdef POSIX_PLATFORM
+#    ifdef RTLD_DEFAULT
+    void *handle = RTLD_DEFAULT;
+#    else
+    void *handle = dlopen(NULL, RTLD_LAZY); /* glibc without _GNU_SOURCE: the global scope includes LD_PRELOAD */
+#    endif
+    if(handle) { *(void **)&mark_fn = dlsym(handle, "alloc_count_mark"); }
+#endif
+}
 
 
 static void report(int32_t i, const char *what, int32_t rc) {
@@ -167,6 +195,7 @@ static int32_t run_reads(int32_t passes, int32_t read_s) {
 
     printf("# reads start\n");
     fflush(stdout);
+    mark("reads start");
     double cpu_start = cpu_time_ms();
     int64_t wall_start = now_us();
 
@@ -187,6 +216,7 @@ static int32_t run_reads(int32_t passes, int32_t read_s) {
                failures);
     }
 
+    mark("reads end");
     int64_t wall_us = now_us() - wall_start;
     double cpu_ms = cpu_time_ms() - cpu_start;
     printf("# reads end\n");
@@ -283,14 +313,19 @@ static bool start(worker_t *w, int32_t i) {
 
     switch(w->phase) {
         case PHASE_CREATE:
-            compat_snprintf(str, sizeof(str), "%s&name=%s%" PRId32 "[%" PRId32 "]&connection_group_id=%" PRId32, base_tag,
-                            name_prefix, array, elem, (i % num_groups) + 1);
+            if(registers) {
+                compat_snprintf(str, sizeof(str), "%s&name=%s%" PRId32 "&connection_group_id=%" PRId32, base_tag, name_prefix, i,
+                                (i % num_groups) + 1);
+            } else {
+                compat_snprintf(str, sizeof(str), "%s&name=%s%" PRId32 "[%" PRId32 "]&connection_group_id=%" PRId32, base_tag,
+                                name_prefix, array, elem, (i % num_groups) + 1);
+            }
             tags[i] = plc_tag_create(str, 0);
             rc = (tags[i] < 0) ? tags[i] : PLCTAG_STATUS_OK;
             break;
 
         case PHASE_WRITE:
-            rc = plc_tag_set_uint32(tags[i], 0, value_for(i));
+            rc = registers ? plc_tag_set_uint16(tags[i], 0, (uint16_t)value_for(i)) : plc_tag_set_uint32(tags[i], 0, value_for(i));
             if(rc == PLCTAG_STATUS_OK) { rc = plc_tag_write(tags[i], 0); }
             break;
 
@@ -321,7 +356,8 @@ static bool finish(worker_t *w, int32_t i, int64_t deadline) {
         return false;
     }
 
-    if(w->phase == PHASE_READ && plc_tag_get_uint32(tags[i], 0) != value_for(i)) {
+    if(w->phase == PHASE_READ
+       && (registers ? plc_tag_get_uint16(tags[i], 0) != (uint16_t)value_for(i) : plc_tag_get_uint32(tags[i], 0) != value_for(i))) {
         report(i, "read back a different value", PLCTAG_ERR_BAD_DATA);
         return false;
     }
@@ -394,13 +430,14 @@ static int32_t run_phase(phase_t phase, int64_t *elapsed_us) {
 static void usage(void) {
     printf("Usage: test_many_tags --tag=BASE --name=PREFIX --tags=N [--groups=G] [--threads=T] [--arrays=K]\n"
            "                      [--max-create-ms=M] [--passes=R] [--read-s=S]\n"
-           "                      [--idle-s=S] [--max-idle-cpu-pct=P]\n"
+           "                      [--idle-s=S] [--max-idle-cpu-pct=P] [--registers]\n"
            "  BASE is a tag string without name and connection_group_id.  Tag i is PREFIX<a>[<e>],\n"
            "  a = (i mod K) + 1, e = i / K, on connection group (i mod G) + 1.\n"
            "  --passes repeats the read phase R times and logs each pass and the summary (default 1).\n"
            "  --read-s keeps repeating it until S seconds have passed as well (default 0).\n"
            "  --idle-s leaves the tags idle S seconds after the read phase and logs process CPU (default 0, off).\n"
-           "  --max-idle-cpu-pct fails the test if idle CPU is more than P percent of one core.\n");
+           "  --max-idle-cpu-pct fails the test if idle CPU is more than P percent of one core.\n"
+           "  --registers names tag i PREFIX<i>, one 16-bit Modbus register, and uses 16-bit values.\n");
     exit(1);
 }
 
@@ -437,6 +474,8 @@ int main(int argc, char **argv) {
             idle_s = (int32_t)atoi(argv[i] + 9);
         } else if(strncmp(argv[i], "--max-idle-cpu-pct=", 19) == 0) {
             max_idle_cpu_pct = atof(argv[i] + 19);
+        } else if(strcmp(argv[i], "--registers") == 0) {
+            registers = true;
         } else {
             printf("Unknown argument: %s\n", argv[i]);
             usage();
@@ -471,12 +510,15 @@ int main(int argc, char **argv) {
     }
 
     seed = (uint32_t)now_ms();
+    find_alloc_count_mark();
 
     printf("%" PRId32 " tags, %" PRId32 " groups, %" PRId32 " threads, %" PRId32 " arrays of %" PRId32 " elements\n", num_tags,
            num_groups, num_threads, num_arrays, (num_tags + num_arrays - 1) / num_arrays);
 
     int64_t rss_start_kb = peak_rss_kb();
+    mark("create start");
     failures += run_phase(PHASE_CREATE, &elapsed_us);
+    mark("create end");
     int64_t rss_created_kb = peak_rss_kb();
     printf("memory   peak RSS %" PRId64 " KB before create, %" PRId64 " KB after create, %.0f bytes per tag\n", rss_start_kb,
            rss_created_kb, (double)(rss_created_kb - rss_start_kb) * 1024.0 / num_tags);

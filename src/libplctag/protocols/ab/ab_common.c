@@ -299,7 +299,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         return (plc_tag_p)NULL;
     }
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "tag=%p", tag);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "tag=%p", (void *)tag);
 
     /*
      * we got far enough to allocate memory, set the default vtable up
@@ -397,7 +397,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     tag->conn = tag->session;
     tag->create_func = ab_tag_create;
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->session);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", (void *)tag->session);
 
     if(!plc) {
         int32_t refused_rc = PLCTAG_STATUS_OK;
@@ -999,7 +999,7 @@ void ab_tag_destroy(ab_tag_p tag) {
 
     /* tags should always have a session.  Release it. */
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Getting ready to release tag session %p",
-           tag ? tag->session : NULL);
+           tag ? (void *)tag->session : NULL);
     if(session) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Removing tag from session.");
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing session reference of tag %" PRId32 ".",

@@ -46,6 +46,7 @@
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
 #include <utils/backoff.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 #include <utils/time_utils.h>
@@ -613,7 +614,7 @@ cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, con
     /* allocate the session struct and the buffer in the same allocation. */
     pdebug(
         DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-        "Allocating %d total bytes of memory with %d bytes for the data buffer, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
+        "Allocating %zu total bytes of memory with %d bytes for the data buffer, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
         total_allocation_size, SESSION_DATA_CAPACITY, str_length(host) + 1,
         (path_offset == 0 ? 0 : str_length(path) + 1), tmp_conn_path_size);
 
@@ -822,7 +823,7 @@ int session_register(cip_conn_p session, exchange_t *ex) {
 
         /* check the response status */
         if(le2h16(resp->encap_command) != AB_EIP_REGISTER_SESSION) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP unexpected response packet type: %d!", resp->encap_command);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP unexpected response packet type: %d!", le2h16(resp->encap_command));
             return PLCTAG_ERR_BAD_DATA;
         }
 
@@ -1054,7 +1055,7 @@ int session_add_request(cip_conn_p session, ab_request_p req) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", session, req);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", (void *)session, (void *)req);
 
     /* the session's reference.  A request being destroyed cannot be queued. */
     if(!rc_inc(req)) {
@@ -1796,7 +1797,7 @@ THREAD_FUNC(session_handler) {
     sm.auto_disconnect_time = time_ms() + sm.inactivity_timeout_ms;
 
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting thread for session %p", session);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting thread for session %p", (void *)session);
 
     /* Increment the count of active session handlers */
 
@@ -1890,7 +1891,7 @@ int purge_aborted_requests_unsafe(cip_conn_p session) {
 
             /* set the debug tag to the owning tag. */
 
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session thread releasing aborted request %p.", request);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session thread releasing aborted request %p.", (void *)request);
 
             /* the same lock as every other hand-off, though the aborting tag has already let go. */
             spin_block(&request->lock) {

@@ -1383,7 +1383,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     /* if the mapping failed, then punt */
     if(id < 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to map tag %p to lookup table entry, rc=%s", tag,
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to map tag %p to lookup table entry, rc=%s", (void *)tag,
                plc_tag_decode_error(id));
         rc_dec(tag);
         rc_dec(tag);
@@ -4952,7 +4952,7 @@ plc_tag_p lookup_tag(int32_t tag_id) {
         tag = hashtable_get(inst->tags, (int64_t)tag_id);
 
         if(tag && tag->tag_id == tag_id) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag_id, "Found tag %p with id %d.", tag, tag->tag_id);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag_id, "Found tag %p with id %d.", (void *)tag, tag->tag_id);
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_inc: Acquiring reference to tag %" PRId32 ".", tag->tag_id);
             tag = rc_inc(tag);
         } else {

@@ -109,7 +109,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
     }
 
     if(conn_path_index >= max_conn_path_size) {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, 0, "Encoded connection path is too long (%d >= %d).",
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, 0, "Encoded connection path is too long (%d >= %zu).",
                (int)(ssize_t)conn_path_index, max_conn_path_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -173,7 +173,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
      * zero pad the path to a multiple of 16-bit
      * words.
      */
-    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "IOI size before %d", conn_path_index);
+    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "IOI size before %zu", conn_path_index);
     if(conn_path_index & 0x01) {
         tmp_conn_path[conn_path_index] = 0;
         conn_path_index++;

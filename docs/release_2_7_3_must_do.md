@@ -21,14 +21,14 @@ Consolidated 2026-11-08 from `ephemeral_docs/deferred_fixes.md` (DF),
 | 3 | `PLCTAG_MAX_TAGS` default | ST §7 | 262144 | Done in code; record only |
 | 4 | Pad slot table entries to 64 bytes | ST §7 | Keep unpadded; revisit if cache effects show in testing | Decided |
 | 5 | Idle CPU phase in `test_many_tags` | SP 1.1 | Add it, off by default (`--idle-s`) | Done |
-| 6 | Connection count ramp on the L81, 1-8 connections | SP 1.2 | Short hardware test | To do |
+| 6 | Connection count ramp on the L81, 1-8 connections | SP 1.2 | Short hardware test | Built 2026-11-18; user runs |
 | 7 | CIP tag ramp, 200 to 200000 tags, zero delay | SP 1.3/1.4 | `run_tag_ramp.py` + `test_many_tags --passes --read-s` | Built; 200000 is client-bound, see #16 |
-| 8 | Modbus tag ramp, 50 to 50000 tags | SP 2.3 | New ramp test, stop at 100% server CPU | To do |
+| 8 | Modbus tag ramp, 50 to 50000 tags | SP 2.3 | New ramp test, stop at 100% server CPU | Built 2026-11-18; user runs on Linux |
 | 9 | Machine-total and per-thread CPU monitoring | SP 3.4 | Added to `run_perf_compare.py`; macOS path untested | Done (Linux) |
 | 10 | v2.7.2 vs HEAD: no regressions | SP 3.5 | Keep the pairwise comparison; no 2.7.0/2.7.1 table | Run on Linux |
 | 11 | Fairness gate thresholds | SP 3A | Functional on M1, final on Linux | To do |
 | 12 | Release regression gate | SP 4 | Covered by 5-11 | Follows from them |
-| 13 | Allocation counting by interposing | SP 5 | macOS and Linux | To do |
+| 13 | Allocation counting by interposing | SP 5 | macOS and Linux | Built 2026-11-18; checked on macOS |
 | 14 | Re-run Linux fairness and Modbus scale matrices, deep idle blocked | PF | User runs | To run |
 | 15 | Final performance numbers | PF | Linux machine | To run |
 | 16 | Tag list insert and remove cost | PF | Array, list and treap trialled | Treap committed (c4753f13) |
@@ -125,6 +125,18 @@ typedef struct {
   judged, because the PLC is shared.
 - Background (SP 1.2): N is the smallest connection count within 5% of the peak. The simulator
   ramp to 128 groups is dropped; the PLC limit is the one that matters.
+- **Built 2026-11-18:** `src/tests/scripts/run_connection_ramp.py`, run by
+  `run_hardware_tests.py` as "connection count ramp, 1 to 8 connections" (stress group, holds
+  the whole chassis).  Ends with the ops/s table, the peak, N, and "throughput drops after K"
+  when it does.  Checked against `ab_server` (Debug, 1 to 3 connections).  Run from a Release
+  `bin_dist` for numbers.
+- **First hardware run 2026-11-18** (L81 at 10.206.1.40, Debug build with sanitizers, shared PLC):
+
+  | Connections | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  |---|---|---|---|---|---|---|---|---|
+  | ops/s | 9465 | 11164 | 13266 | 13971 | 14342 | 14989 | 15050 | 14948 |
+
+  Peak 15050 at 7; N = 5.  Past 6 the curve is flat (8 is 0.7% under 7, within noise).
 
 ## 7. CIP tag ramp, 200 to 200000 tags, zero delay
 
@@ -196,6 +208,13 @@ typedef struct {
   on every log call, about 8% of busy samples. Left alone (deferred).
 - Server CPU at 2026-10-31: 78% of its one core at 8 connections, no delay. Expect the stop rule
   to trigger.
+- **Built 2026-11-18:** `run_tag_ramp.py --protocol=modbus --bin-dir=<Release bin_dist>
+  [--groups=8]`.  `test_many_tags --registers` names tag i `hr<i>`, one 16-bit register.  The
+  server gets `--holding-registers` = the largest step.  The ramp stops when the server's CPU over
+  a step's read passes reaches `--server-limit-pct` (default 95) of one core.
+- **Functional check 2026-11-18** (M1, Release, 1 connection): 50 to 50000 all pass.  At 50000,
+  median pass 2398 ms (20850 tags/s), client 126% of a core, server 20%: client bound at one
+  connection, the stop rule did not trigger.
 
 ## 9. Machine-total and per-thread CPU monitoring
 
@@ -271,6 +290,19 @@ gives throughput, CPU per op and memory, item 11 gives fairness. Nothing extra t
 - **Output:** counts and bytes, printed at exit and at a marker the test can trigger (a signal
   or an environment variable naming a phase).
 - Relates to the no-runtime-allocation goal: this is the measurement that shows progress.
+- **Built 2026-11-18:** `src/tests/alloc_count/` builds `liballoc_count` (not in sanitizer
+  builds).  `alloc_count_mark(label)` prints counts since the last mark and totals to stderr, and
+  again at exit; `test_many_tags` finds it with `dlsym` and marks create start/end and reads
+  start/end.  `run_tag_ramp.py --alloc-count=<lib>` loads it and adds allocations per tag created
+  and per tag read to the table.  Linux Release links the tests `-static`, where `LD_PRELOAD`
+  does nothing: configure with `-DUSE_VALGRIND=1`.  The runner fails a step whose output has no
+  counts.
+- **First numbers 2026-11-18** (M1, Release, 1 connection, 3 passes):
+
+  | Protocol, tags | Allocs per create | Allocs per read |
+  |---|---|---|
+  | CIP, 2000 | 29.0 | 2.0 (12005 allocs, 12000 frees over 6000 reads) |
+  | Modbus, 50000 | 19.0 | 0 |
 
 ## 14. Re-run Linux fairness and Modbus scale matrices
 

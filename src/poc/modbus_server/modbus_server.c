@@ -885,7 +885,7 @@ int main(int argc, char *argv[]) {
 
         memset(listener_info, 0, sizeof(listener_info_t));
         listener_info->server = &server;
-        strncpy(listener_info->bind_address, addr_str, sizeof(listener_info->bind_address) - 1);
+        snprintf(listener_info->bind_address, sizeof(listener_info->bind_address), "%s", addr_str);
         listener_info->bind_port = port;
 
         coro_task_handle_t listener_handle;

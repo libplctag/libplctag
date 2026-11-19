@@ -271,7 +271,7 @@ int setup_raw_tag(ab_tag_p tag) {
 
     tag->byte_order = &logix_tag_byte_order;
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", &raw_tag_vtable);
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", (void *)&raw_tag_vtable);
 
     tag->vtable = &raw_tag_vtable;
 
@@ -471,7 +471,7 @@ int setup_identity_tag(ab_tag_p tag) {
 
     tag->byte_order = &logix_tag_byte_order;
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", &identity_tag_vtable);
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", (void *)&identity_tag_vtable);
 
     tag->vtable = &identity_tag_vtable;
 
