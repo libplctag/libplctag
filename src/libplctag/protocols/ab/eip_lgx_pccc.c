@@ -198,7 +198,7 @@ int tag_read_start(plc_tag_p tag_arg) {
             break;
         }
 
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             tag->read_in_progress = 0;
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request. rc=%d", rc);
@@ -430,7 +430,7 @@ int tag_write_start(plc_tag_p tag_arg) {
             break;
         }
 
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             tag->write_in_progress = 0;
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request. rc=%d", rc);

@@ -49,6 +49,8 @@ typedef struct ab_request_t *ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 extern int ab_tag_abort_request_only(ab_tag_p tag);
+/* hands over the tag's spare request, or NULL. */
+extern ab_request_p ab_tag_take_spare_request(ab_tag_p tag);
 extern int ab_tag_abort_request(ab_tag_p tag);
 /* ab_tag_abort_request() with the vtable signature. */
 extern int ab_tag_vtable_abort(plc_tag_p tag);

@@ -178,7 +178,7 @@ REQUIRED_EXECUTABLES = [
     "tag_rw2", "test_special", "test_tag_attributes", "test_tag_type_attribute",
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
-    "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
+    "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy", "test_request_churn",
     "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy", "test_find_or_create_tag",
     "test_tag_listing_reread", "test_create_fail_callback", "perf_benchmark",
 ]
@@ -538,6 +538,16 @@ def build_manifest() -> list[Test]:
         test("bundled reads of several ordinary tags",
              group="stress", cmd=[exe("thread_stress"), "4",
               f"protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray"]),
+        # Random reads, writes, aborts and destroys with mostly 0-4 ms timeouts: every way a
+        # request is released, and the reuse of each tag's spare request.  Writes TestBigArray[0..99]
+        # and N7:0 (only N7:0 is known to exist on the PCCC PLCs).
+        test("request churn ControlLogix",
+             group="stress", cmd=[exe("test_request_churn"),
+              f"protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix", "TestBigArray", "100", "4", "20"]),
+        test("request churn PLC5",
+             group="stress", cmd=[exe("test_request_churn"), f"protocol=ab-eip&gateway={plc5_gw}&plc=plc5", "N7:", "1", "1", "20"]),
+        test("request churn MicroLogix",
+             group="stress", cmd=[exe("test_request_churn"), f"protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix", "N7:", "1", "1", "20"]),
         # Connection count ramp (must-do item 6): where adding connections stops helping.  The
         # curve is logged, not judged; it fails only on errors or a run with no reads.  Holds the
         # whole chassis so other tests do not bend the curve.

@@ -397,6 +397,9 @@ static int32_t core_set_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t value)
 
     atomic_set_int32(&tag->destroy_idle_sec, value);
 
+    /* a protocol that schedules its own idle check re-arms it. */
+    if(tag->vtable && tag->vtable->idle_changed) { tag->vtable->idle_changed(tag); }
+
     return PLCTAG_STATUS_OK;
 }
 

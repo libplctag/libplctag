@@ -290,7 +290,7 @@ static int send_next_request(ab_tag_p tag) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;

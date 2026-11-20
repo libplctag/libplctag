@@ -1556,7 +1556,7 @@ int pccc_tag_read_start(plc_tag_p tag_arg) {
         }
 
         /* create the request */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             break;
@@ -1812,7 +1812,7 @@ int pccc_tag_write_start(plc_tag_p tag_arg) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;
@@ -1979,7 +1979,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;
@@ -2166,7 +2166,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;

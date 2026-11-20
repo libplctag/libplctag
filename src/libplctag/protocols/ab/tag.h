@@ -135,6 +135,8 @@ struct ab_tag_t {
     int pre_write_read;
     int first_read;
     ab_request_p req;
+    /* the last finished request, kept so the next one does not allocate. */
+    ab_request_p spare_req;
     int offset;
 
     int allow_packing;

@@ -399,7 +399,7 @@ int raw_tag_build_write_request(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
+    rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%s",
                plc_tag_decode_error(rc));
@@ -562,7 +562,7 @@ int identity_tag_build_read_request(ab_tag_p tag) {
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%s",
                plc_tag_decode_error(rc));
@@ -1059,7 +1059,7 @@ int listing_tag_build_read_request(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -1506,7 +1506,7 @@ int udt_tag_build_read_metadata_request(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -1795,7 +1795,7 @@ int udt_tag_build_read_fields_request(ab_tag_p tag) {
     }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
+    rc = session_reuse_request(tag->session, ab_tag_take_spare_request(tag), tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         ab_tag_abort_request(tag);

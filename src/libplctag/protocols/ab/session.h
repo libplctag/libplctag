@@ -198,6 +198,9 @@ struct ab_request_t {
     int resp_received;
     atomic_int32_t abort_request;
 
+    /* true while the session holds it, queued or in a batch.  Cleared just before the session's rc_dec. */
+    atomic_bool in_session;
+
     /* debugging info */
     int tag_id;
 
@@ -227,6 +230,28 @@ struct ab_request_t {
     uint8_t *data;
 };
 
+/*
+ * A tag's spare request is off limits until session_reuse_request() or the tag's destroy takes it.
+ * Under ASan it is poisoned, so a stale pointer into it is reported instead of reading a reused
+ * request.  The rc header before it stays unpoisoned: rc_inc()/rc_dec() still work.
+ */
+#if defined(__SANITIZE_ADDRESS__)
+#    include <sanitizer/asan_interface.h>
+#    define REQUEST_SPARE_POISON(r)                                                         \
+        do {                                                                                \
+            ASAN_POISON_MEMORY_REGION((r)->data, (size_t)(r)->request_capacity);            \
+            ASAN_POISON_MEMORY_REGION((r), sizeof(*(r)));                                   \
+        } while(0)
+#    define REQUEST_SPARE_UNPOISON(r)                                                       \
+        do {                                                                                \
+            ASAN_UNPOISON_MEMORY_REGION((r), sizeof(*(r)));                                 \
+            ASAN_UNPOISON_MEMORY_REGION((r)->data, (size_t)(r)->request_capacity);          \
+        } while(0)
+#else
+#    define REQUEST_SPARE_POISON(r) ((void)(r))
+#    define REQUEST_SPARE_UNPOISON(r) ((void)(r))
+#endif
+
 
 /* the next PCCC TNS: 16 bits, never 0. */
 uint16_t session_get_new_seq_id(cip_conn_p sess);
@@ -238,6 +263,8 @@ extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new
 extern bool session_connected_conflicts(cip_conn_p session, int use_connected_msg);
 extern int session_get_available_cip_payload_space(cip_conn_p session);
 extern int session_create_request(cip_conn_p session, int tag_id, ab_request_p *request);
+/* reuses spare, a request the session no longer holds, when it is big enough; else releases it and creates one. */
+extern int session_reuse_request(cip_conn_p session, ab_request_p spare, int tag_id, ab_request_p *request);
 extern int session_add_request(cip_conn_p sess, ab_request_p req);
 
 /* The PLC type, AB_PLC_NONE while identify runs; *refused_rc is set when the PLC refused the session. */

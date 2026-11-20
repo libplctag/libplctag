@@ -721,9 +721,8 @@ THREAD_FUNC(tag_tickler_func) {
             for(int i = 0; i < max_index; i++) {
                 plc_tag_p tag = hashtable_get_index(inst->tags, i);
 
-                /* a tag that skips the tickler is still checked for auto-destroy. */
-                if(tag && (!atomic_get_bool(&tag->skip_tickler) || atomic_get_int32(&tag->destroy_idle_sec) > 0)
-                   && rc_inc(tag) != NULL) {
+                /* a tag that skips the tickler has its own thread, which also checks auto-destroy. */
+                if(tag && !atomic_get_bool(&tag->skip_tickler) && rc_inc(tag) != NULL) {
                     vector_insert(active_tags, vector_length(active_tags), tag);
                 }
             }
@@ -737,13 +736,7 @@ THREAD_FUNC(tag_tickler_func) {
             plc_tag_p tag = vector_get(active_tags, tag_index);
             bool idle_expired = false;
 
-            if(atomic_get_bool(&tag->skip_tickler)) {
-                /* here only for auto-destroy.  Locked by the application means in use. */
-                if(mutex_try_lock(&tag->api_mutex) == PLCTAG_STATUS_OK) {
-                    idle_expired = tag_idle_expired_unsafe(tag, time_ms());
-                    mutex_unlock(&tag->api_mutex);
-                }
-            } else if(mutex_try_lock(&tag->api_mutex) == PLCTAG_STATUS_OK) {
+            if(mutex_try_lock(&tag->api_mutex) == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "calling generic tag tickler.");
 
                 plc_tag_generic_tickler(tag);
@@ -2004,6 +1997,13 @@ static void auto_destroy_tag(lib_instance_p inst, plc_tag_p tag) {
            atomic_get_int32(&tag->destroy_idle_sec));
 
     destroy_tag_common(removed);
+}
+
+
+extern void plc_tag_generic_auto_destroy(plc_tag_p tag) {
+    if(!tag || !tag->instance) { return; }
+
+    auto_destroy_tag(tag->instance, tag);
 }
 
 

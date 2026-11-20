@@ -311,7 +311,7 @@ REQUIRED_EXECUTABLES = [
     "test_set_size_fixed", "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
-    "test_bit_write", "test_auto_destroy", "test_find_or_create_tag", "test_many_tags",
+    "test_bit_write", "test_auto_destroy", "test_find_or_create_tag", "test_many_tags", "test_request_churn",
 ]
 
 
@@ -500,6 +500,22 @@ def build_manifest() -> Manifest:
               server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
     sec.test("CIP thread stress",
               [exe("thread_stress"), "20", f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], S)
+    # Random reads, writes, aborts and destroys with 0-4 ms timeouts: every way a CIP request is
+    # released, and the reuse of each tag's spare request.  Each has its own server, no --debug.
+    def churn_server(plc: str, path: Optional[str], tag: str, delay_ms: int) -> ServerSpec:
+        return ServerSpec(exe_path=exe("ab_server"),
+                          args_template=[f"--plc={plc}", "--port={PORT}", f"--tag={tag}", f"--delay-ms={delay_ms}"]
+                                        + ([f"--path={path}"] if path else []),
+                          startup_wait_s=1)
+    for delay_ms in (0, 2):
+        sec.test(f"request churn ControlLogix, server delay {delay_ms} ms",
+                  [exe("test_request_churn"), f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix", "Churn",
+                   "200", "8", "10"], S, server=churn_server("ControlLogix", "1,0", "Churn:DINT[200]", delay_ms))
+    for server_plc, plc, path in (("PLC/5", "plc5", None), ("SLC500", "slc500", None),
+                                  ("Micrologix", "micrologix", None), ("LgxPccc", "lgxpccc", "1,0")):
+        sec.test(f"request churn {plc}, server delay 1 ms",
+                  [exe("test_request_churn"), f"protocol=ab-eip&gateway={gw}&plc={plc}" + (f"&path={path}" if path else ""),
+                   "N7:", "50", "4", "10"], S, server=churn_server(server_plc, path, "N7[50]", 1))
     # Raw CIP tags are the one tag type whose request is the CIP message alone, so
     # they are what exercises the library's own EIP/CPF framing. Run both messaging
     # modes: the framing is the only thing that differs between them.

@@ -146,6 +146,12 @@ struct tag_vtable_t {
      */
     tag_vtable_func tag_data_written;
 
+    /*
+     * Called after destroy_tag_after_idle_sec changes at runtime, while api_mutex is held.
+     * NULL for a protocol whose tags the generic tickler checks for idling.
+     */
+    tag_vtable_func idle_changed;
+
     /* Runtime attributes this protocol publishes, NULL-name-terminated.  Consulted before
      * the core table, so a protocol can override or suppress a core attribute. */
     const attr_def_t *attribs;
@@ -343,6 +349,8 @@ extern void lib_instance_discard_pending(void);
 #define TAG_AUTO_DESTROY_MIN_SEC (10)
 
 extern void plc_tag_generic_tickler(plc_tag_p tag);
+/* Destroy a tag that has idled past destroy_tag_after_idle_sec.  Call holding no tag or PLC lock. */
+extern void plc_tag_generic_auto_destroy(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
 /* Queue an event.  False only when the ring is full; with no callback the event is dropped. */
 extern bool tag_event_push(plc_tag_p tag, int event, int status);

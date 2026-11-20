@@ -868,7 +868,14 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id,
                            "rc_dec: Releasing tag-owned reference to request of tag %" PRId32 ".", tag->tag_id);
                     tag->req = NULL;
-                    rc_dec(req);
+
+                    /* the session is done with it: keep it for the next request. */
+                    if(!tag->spare_req && !atomic_get_bool(&req->in_session)) {
+                        tag->spare_req = req;
+                        REQUEST_SPARE_POISON(req);
+                    } else {
+                        rc_dec(req);
+                    }
                 } else {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
                            "Request changed out from underneath us during abort process!");
@@ -900,6 +907,18 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
  */
 
 int ab_tag_vtable_abort(plc_tag_p tag) { return ab_tag_abort_request((ab_tag_p)tag); }
+
+
+extern ab_request_p ab_tag_take_spare_request(ab_tag_p tag) {
+    ab_request_p spare = NULL;
+
+    critical_block(&tag->api_mutex) {
+        spare = tag->spare_req;
+        tag->spare_req = NULL;
+    }
+
+    return spare;
+}
 
 
 int ab_tag_abort_request(ab_tag_p tag) {
@@ -994,6 +1013,10 @@ void ab_tag_destroy(ab_tag_p tag) {
 
     /* abort anything in flight */
     ab_tag_abort(tag);
+
+    /* after the abort, which can leave one here. */
+    if(tag->spare_req) { REQUEST_SPARE_UNPOISON(tag->spare_req); }
+    tag->spare_req = rc_dec(tag->spare_req);
 
     session = tag->session;
 

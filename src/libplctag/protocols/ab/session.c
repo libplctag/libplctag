@@ -994,8 +994,11 @@ void session_destroy(void *session_arg) {
         /* release all the requests that are in the queue. */
         if(session->requests) {
             for(int i = 0; i < vector_length(session->requests); i++) {
+                ab_request_p request = vector_get(session->requests, i);
+
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_dec: Releasing request reference.");
-                rc_dec(vector_get(session->requests, i));
+                if(request) { atomic_set_bool(&request->in_session, false); }
+                rc_dec(request);
             }
 
             vector_destroy(session->requests);
@@ -1072,6 +1075,7 @@ int session_add_request(cip_conn_p session, ab_request_p req) {
         }
 
         /* insert into the requests vector */
+        atomic_set_bool(&req->in_session, true);
         vector_set(session->requests, vector_length(session->requests), req);
     }
 
@@ -1209,6 +1213,7 @@ static void fail_queued_requests(cip_conn_p session) {
                 request->resp_received = 1;
             }
 
+            atomic_set_bool(&request->in_session, false);
             rc_dec(request);
             failed++;
         }
@@ -1902,6 +1907,7 @@ int purge_aborted_requests_unsafe(cip_conn_p session) {
 
             /* release our hold on it. */
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_dec: Releasing request reference.");
+            atomic_set_bool(&request->in_session, false);
             rc_dec(request);
 
             /* vector size has changed, back up one. */
@@ -2141,6 +2147,7 @@ static int deliver_batch(cip_conn_p session, req_batch_t *b) {
         }
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, b->reqs[i]->tag_id, "rc_dec: Releasing request reference.");
+        atomic_set_bool(&b->reqs[i]->in_session, false);
         b->reqs[i] = rc_dec(b->reqs[i]);
     }
 
@@ -3385,6 +3392,39 @@ int session_create_request(cip_conn_p session, int tag_id, ab_request_p *req) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
 
     return rc;
+}
+
+
+extern int session_reuse_request(cip_conn_p session, ab_request_p spare, int tag_id, ab_request_p *req) {
+    int request_capacity = 0;
+    uint8_t *data = NULL;
+
+    if(!spare) { return session_create_request(session, tag_id, req); }
+
+    REQUEST_SPARE_UNPOISON(spare);
+
+    critical_block(&session->session_mutex) {
+        request_capacity = session_get_available_cip_payload_space(session) + EIP_CIP_PREFIX_SIZE;
+    }
+
+    /* the connection's payload can grow after a new Forward Open. */
+    if(spare->request_capacity < request_capacity) {
+        rc_dec(spare);
+        return session_create_request(session, tag_id, req);
+    }
+
+    /* back to how session_create_request() leaves it.  The session no longer touches it. */
+    data = spare->data;
+    request_capacity = spare->request_capacity;
+    mem_set(spare, 0, (int32_t)sizeof(*spare));
+    spare->data = data;
+    spare->request_capacity = request_capacity;
+    spare->tag_id = tag_id;
+    spare->lock = LOCK_INIT;
+
+    *req = spare;
+
+    return PLCTAG_STATUS_OK;
 }
 
 

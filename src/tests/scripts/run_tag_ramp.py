@@ -23,6 +23,7 @@ binary must be dynamic: Release links it -static unless configured with -DUSE_VA
 
 Usage:
   run_tag_ramp.py --bin-dir=build/bin_dist [--protocol=cip|modbus] [--ramp=200,2000,20000,200000]
+      [--plc=controllogix|plc5|slc500|micrologix|lgxpccc]
       [--passes=10] [--read-s=3] [--groups=1] [--threads=1] [--delay-ms=0] [--idle-s=0]
       [--server-limit-pct=95] [--alloc-count=build/bin_dist/liballoc_count.dylib]
 """
@@ -45,7 +46,10 @@ from run_perf_compare import (CORES, busiest_thread_pct, cpu_seconds, int_list, 
 
 PORT = 44850
 MODBUS_PORT = 50200
-RAMPS = {"cip": (200, 2000, 20000, 200000), "modbus": (50, 500, 5000, 50000)}
+RAMPS = {"cip": (200, 2000, 20000, 200000), "modbus": (50, 500, 5000, 50000), "pccc": (50, 250, 1000)}
+# --plc: the plc= value -> ab_server's --plc and the path, None for none.  All but ControlLogix are PCCC.
+PLCS = {"controllogix": ("ControlLogix", "1,0"), "plc5": ("PLC/5", None), "slc500": ("SLC500", None),
+        "micrologix": ("Micrologix", None), "lgxpccc": ("LgxPccc", "1,0")}
 MAX_ARRAY_ELEMS = 65535
 
 # test_many_tags output lines this script reads; every other line is only echoed.
@@ -91,6 +95,11 @@ def run_step(args, tags, arrays, server):
     if args.protocol == "modbus":
         cmd = [str(args.bin_dir / "test_many_tags"), "--tag=protocol=modbus-tcp&gateway=127.0.0.1:%d&path=1" % MODBUS_PORT,
                "--name=hr", "--registers"]
+    elif args.plc != "controllogix":
+        path = PLCS[args.plc][1]
+        cmd = [str(args.bin_dir / "test_many_tags"),
+               f"--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc={args.plc}" + (f"&path={path}" if path else ""),
+               "--name=N7:", "--registers"]
     else:
         cmd = [str(args.bin_dir / "test_many_tags"), "--tag=protocol=ab-eip&gateway=127.0.0.1:%d&path=1,0&plc=ControlLogix" % PORT,
                "--name=perfTag", f"--arrays={arrays}"]
@@ -123,8 +132,9 @@ def run_step(args, tags, arrays, server):
         dt = end["t"] - start["t"]
         r.update(server_cpu_pct=100.0 * (end["srv"] - start["srv"]) / dt,
                  server_thread_pct=busiest_thread_pct(start["threads"], end["threads"], dt),
-                 machine_cpu_pct=100.0 * (end["machine"] - start["machine"]) / dt,
                  server_rss_kb=end["rss"])
+        if start["machine"] is not None:
+            r["machine_cpu_pct"] = 100.0 * (end["machine"] - start["machine"]) / dt
     return r
 
 
@@ -182,6 +192,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--bin-dir", type=Path, help="holds test_many_tags and ab_server")
     p.add_argument("--protocol", choices=("cip", "modbus"), default="cip")
+    p.add_argument("--plc", type=str.lower, choices=PLCS, default="controllogix",
+                   help="cip: a PCCC type reads 16-bit tags N7:0..N7:<n-1> from one N7 file")
     p.add_argument("--ramp", type=int_list, help="default 200,2000,20000,200000 for cip, 50,500,5000,50000 for modbus")
     p.add_argument("--passes", type=int, default=10, help="at least this many read passes per step")
     p.add_argument("--read-s", type=int, default=3, help="and at least this long, so CPU sampling has a usable window")
@@ -204,7 +216,8 @@ def main():
     if soft < want:
         resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
 
-    args.ramp = args.ramp or RAMPS[args.protocol]
+    pccc = args.protocol == "cip" and args.plc != "controllogix"
+    args.ramp = args.ramp or RAMPS["pccc" if pccc else args.protocol]
     arrays = arrays_for(max(args.ramp), args.groups)
     elems = math.ceil(max(args.ramp) / arrays)
     if args.protocol == "modbus":
@@ -213,6 +226,11 @@ def main():
         port = MODBUS_PORT
         cmd = [str(args.bin_dir / "modbus_server"), f"--listen=127.0.0.1:{port}", f"--holding-registers={max(args.ramp)}",
                "--debug=WARN"]
+    elif pccc:
+        port = PORT
+        server_plc, path = PLCS[args.plc]
+        cmd = [str(args.bin_dir / "ab_server"), f"--plc={server_plc}", f"--port={port}", f"--tag=N7[{max(args.ramp)}]"]
+        cmd += [f"--path={path}"] if path else []
     else:
         port = PORT
         cmd = [str(args.bin_dir / "ab_server"), "--plc=ControlLogix", f"--port={port}", "--path=1,0"]
