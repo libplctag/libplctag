@@ -167,17 +167,22 @@ void destroy_modules(void) {
     }
 
     /*
-     * The one wait, with no timeout: every queued destructor runs, and a connection's destructor
-     * joins its handler thread.  Handlers stop on lib_active, so nothing needs a signal first.
-     * The AB and Modbus modules keep no state to free; their list locks live for the process,
-     * so a destructor that runs later, from a reference held across shutdown, still finds them.
-     * The tag registry goes after this, since tag destructors use it.
+     * Every other module first, the refcount module dead last.  Its cleanup thread runs until the
+     * queue is empty, so nothing else may still be able to drop a reference by then: the Modbus
+     * handlers are joined here.  An AB session handler only drops request references, whose
+     * destructor is safe on any thread; a session's destructor joins its handler.  The AB and
+     * Modbus list locks live for the process, so a destructor that runs later, from a reference
+     * held across shutdown, still finds them.  Tags hold the instance, so dropping its last
+     * reference here frees it only after them.
      */
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Running deferred destructors.");
-    refcount_teardown();
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
+    mb_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
     lib_teardown();
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Running deferred destructors.");
+    refcount_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Unregistering logger.");
     plc_tag_unregister_logger();
