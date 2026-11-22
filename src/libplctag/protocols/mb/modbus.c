@@ -979,6 +979,9 @@ static int reset_plc(modbus_plc_p plc) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "After reset, in-flight count is: %" PRId32,
                atomic_get_int32(&plc->pending_request_count));
 
+        /* the socket closes below, so nothing is in flight; this frees the slots of aborted requests. */
+        atomic_set_int32(&plc->pending_request_count, 0);
+
         if(plc->sock) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Closing socket due to error or disconnect.");
             socket_close(plc->sock);
@@ -1546,6 +1549,7 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
     int64_t min_wait_time = MODBUS_IDLE_WAIT_TIMEOUT;
     int64_t now = time_ms();
     bool has_due_request_pending = false; /* REQUEST-state tag is due now but was not sent this cycle */
+    bool restart = false;                 /* the phase 1b walk must start again from the front */
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Starting.");
 
@@ -1553,8 +1557,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
      * Phase 1 -- inside plc->mutex.
      *
      * a) Find the tag that owns the pending response (if any).
-     * b) Send a request for the first due REQUEST-state tag (if a slot is free).
-     * c) Compute min_wait_time from the first future REQUEST-state tag's op_time.
+     * b) (Phase 1b) Walk the due tags: expire IDLE_EXPIRY tags, send one request if a slot
+     *    is free, and compute min_wait_time from the first tag due in the future.
      *
      * Response processing is done OUTSIDE the mutex (Phase 2/3) so that
      * tag_op_*_response can acquire plc->mutex for remove/re-insert.
@@ -1562,7 +1566,6 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
      */
     critical_block(&plc->mutex) {
         uint16_t response_transaction_id = 0;
-        int active_count = vector_length(plc->active_tags);
 
         /* Extract transaction ID from the pending response buffer. */
         if(atomic_get_bool(&plc->flags.response_ready) && plc->read_data_len >= 2) {
@@ -1587,95 +1590,99 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
             decrement_request_count(plc);
         }
 
-        /*
-         * Send a request for the first due REQUEST-state tag.
-         * active_tags is sorted ascending by op_time; RESPONSE-state tags are at the
-         * front (their op_times are in the past).  Scan past them to find the first
-         * REQUEST-state tag with op_time <= now.
-         *
-         * Only one request is queued per tickle call because request_ready is a
-         * single-entry buffer; pipelining happens across successive main-loop iterations.
-         */
-        if(!atomic_get_bool(&plc->flags.request_ready) && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight) {
-            for(int i = 0; i < active_count; i++) {
-                modbus_tag_p candidate = vector_get(plc->active_tags, i);
-                if(!candidate) { continue; }
-
-                /* RESPONSE-state tags sort to the front; skip them. */
-                if(op_is_response(tag_op_get(candidate))) {
-                    continue;
-                }
-
-                /* First REQUEST-state tag.  If its time is in the future, nothing is due. */
-                if(candidate->op_time > now) { break; }
-
-                /* Due REQUEST-state tag found.  Try to grab its mutex. */
-                if(rc_inc(candidate)) {
-                    if(mutex_try_lock(&candidate->api_mutex) == PLCTAG_STATUS_OK) {
-                        if(tag_op_get(candidate) == TAG_OP_IDLE_EXPIRY) {
-                            /* idle too long: off the list now, destroyed below once both locks are released. */
-                            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Tag %" PRId32 " idled past its limit.",
-                                   candidate->tag_id);
-                            remove_tag_from_active(plc, candidate);
-                            tag_op_set(candidate, TAG_OP_IDLE);
-                            candidate->op_changed_time = now;
-                            expired_tag = rc_inc(candidate);
-                        } else {
-                            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Sending request for tag %" PRId32 " (op=%s).",
-                                   candidate->tag_id, op_to_str(tag_op_get(candidate)));
-
-                            rc = tickle_tag(plc, candidate, now, &min_wait_time);
-                            if(rc == PLCTAG_STATUS_PENDING) {
-                                rc = PLCTAG_STATUS_OK;
-                            } else if(rc != PLCTAG_STATUS_OK) {
-                                pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s sending request for tag %" PRId32 "!",
-                                       plc_tag_decode_error(rc), candidate->tag_id);
-                            }
-                        }
-
-                        mutex_unlock(&candidate->api_mutex);
-                    } else {
-                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Tag %" PRId32 " api_mutex busy; skipping request send.",
-                               candidate->tag_id);
-                    }
-                    candidate = rc_dec(candidate);
-                }
-
-                /* Only process one REQUEST-state tag per tickle (single request_ready slot). */
-                break;
-            }
-        }
-
-        /*
-         * Compute min_wait_time: find the first REQUEST-state tag whose op_time is
-         * in the future.  RESPONSE-state tags at the front are skipped (their
-         * op_times are in the past and are not used for scheduling).
-         */
-        for(int i = 0; i < active_count; i++) {
-            modbus_tag_p candidate = vector_get(plc->active_tags, i);
-            if(!candidate) { continue; }
-
-            if(op_is_response(tag_op_get(candidate))) {
-                    continue;
-                }
-
-            /* First REQUEST-state tag. */
-            if(candidate->op_time > now) {
-                int64_t wait = candidate->op_time - now;
-                if(wait < min_wait_time) { min_wait_time = wait; }
-            } else {
-                /* Tag is already due but could not be sent this cycle (at capacity or request_ready set). */
-                has_due_request_pending = true;
-            }
-            break; /* sorted, so only need the first REQUEST-state entry */
-        }
     } /* end critical_block(&plc->mutex) */
 
-    /* the destroy takes the tag's api_mutex and plc->mutex itself. */
-    if(expired_tag) {
-        plc_tag_generic_auto_destroy((plc_tag_p)expired_tag);
-        expired_tag = rc_dec(expired_tag);
-    }
+    /*
+     * Phase 1b -- due tags, inside plc->mutex.
+     *
+     * active_tags is sorted by op_time.  Walk it from the front, skipping tags waiting for a
+     * reply, until a tag is due in the future.  A due IDLE_EXPIRY tag needs no request slot and
+     * is taken off now.  A tag that needs a slot is skipped while none is free; request_ready
+     * is a single-entry buffer, so one request is built per pass at most.  Replies are matched
+     * only among the RESPONSE tags at the front, so nothing is sent past a due tag left unsent.
+     *
+     * The destroy of an expired tag takes the tag's api_mutex and plc->mutex itself, so the
+     * walk stops, the destroy runs with no lock held, and the walk starts again from the front.
+     * A send that moves its tag (a failed build) also starts it again, so no tag is skipped.
+     */
+    do {
+        restart = false;
+
+        critical_block(&plc->mutex) {
+            for(int i = 0; i < vector_length(plc->active_tags); i++) {
+                modbus_tag_p candidate = vector_get(plc->active_tags, i);
+                tag_op_type_t op = TAG_OP_IDLE;
+                bool slot_free = false;
+
+                if(!candidate) { continue; }
+
+                op = tag_op_get(candidate);
+
+                /* waiting for a reply; its op_time is not a due time. */
+                if(op_is_response(op)) { continue; }
+
+                /* sorted, so nothing after this is due either. */
+                if(candidate->op_time > now) {
+                    int64_t wait = candidate->op_time - now;
+                    if(wait < min_wait_time) { min_wait_time = wait; }
+                    break;
+                }
+
+                /* never past a due tag left unsent: find_response_tag() only looks at the RESPONSE
+                 * tags at the front, so a tag sent behind one would have its reply discarded. */
+                slot_free = !has_due_request_pending && !atomic_get_bool(&plc->flags.request_ready)
+                            && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight;
+
+                if(op != TAG_OP_IDLE_EXPIRY && !slot_free) {
+                    has_due_request_pending = true;
+                    continue;
+                }
+
+                if(!rc_inc(candidate)) { continue; }
+
+                if(mutex_try_lock(&candidate->api_mutex) == PLCTAG_STATUS_OK) {
+                    if(tag_op_get(candidate) == TAG_OP_IDLE_EXPIRY) {
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Tag %" PRId32 " idled past its limit.", candidate->tag_id);
+                        remove_tag_from_active(plc, candidate);
+                        tag_op_set(candidate, TAG_OP_IDLE);
+                        candidate->op_changed_time = now;
+                        expired_tag = rc_inc(candidate);
+                        restart = true;
+                    } else if(slot_free) {
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Sending request for tag %" PRId32 " (op=%s).",
+                               candidate->tag_id, op_to_str(tag_op_get(candidate)));
+
+                        rc = tickle_tag(plc, candidate, now, &min_wait_time);
+                        if(rc == PLCTAG_STATUS_PENDING) {
+                            rc = PLCTAG_STATUS_OK;
+                        } else if(rc != PLCTAG_STATUS_OK) {
+                            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s sending request for tag %" PRId32 "!",
+                                   plc_tag_decode_error(rc), candidate->tag_id);
+                        }
+
+                        if(vector_get(plc->active_tags, i) != candidate) { restart = true; }
+                    } else {
+                        has_due_request_pending = true;
+                    }
+
+                    mutex_unlock(&candidate->api_mutex);
+                } else {
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Tag %" PRId32 " api_mutex busy; skipping it this pass.",
+                           candidate->tag_id);
+                    has_due_request_pending = true;
+                }
+
+                candidate = rc_dec(candidate);
+
+                if(restart) { break; }
+            }
+        }
+
+        if(expired_tag) {
+            plc_tag_generic_auto_destroy((plc_tag_p)expired_tag);
+            expired_tag = rc_dec(expired_tag);
+        }
+    } while(restart);
 
     /*
      * Phase 2 -- outside plc->mutex.
@@ -1870,8 +1877,8 @@ static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Error %s creating read request!", plc_tag_decode_error(rc));
 
-        tag_op_set(tag, TAG_OP_IDLE);
-        tag->op_changed_time = time_ms();
+        /* off active_tags, or no other tag on this PLC is sent; phase 1 holds plc->mutex. */
+        idle_tag_unsafe(plc, tag, time_ms());
         tag->read_complete = 1;
         tag->read_in_flight = 0;
         tag->status = (int8_t)rc;
@@ -1897,7 +1904,7 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
     /*
      * Called only after find_response_tag() confirmed a match and response_ready is set.
      * plc->mutex is NOT held here.  pending_request_count is atomic_int32_t so it is
-     * safe to decrement without the mutex even when mb_abort may concurrently do the same.
+     * safe to decrement without the mutex.
      * No need to re-check state regression: reset_plc() already resets all
      * RESPONSE-state tags back to REQUEST state when the connection drops.
      */
@@ -1918,7 +1925,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
             tag_op_set(tag, (tag_op_get(tag) == TAG_OP_AUTO_READ_RESPONSE) ? TAG_OP_AUTO_READ_REQUEST : TAG_OP_READ_REQUEST);
             tag->op_changed_time = now;
             tag->request_start_time = now;
-            tag->op_time = now; /* ensure it fires immediately on next pass */
+            /* fire on the next pass; re-sort so the scans, which stop early, see it. */
+            critical_block(&plc->mutex) { move_tag_sorted(plc, tag, vector_find_index(plc->active_tags, tag), now); }
             tag->status = PLCTAG_STATUS_PENDING;
 
             rc = PLCTAG_STATUS_PENDING;
@@ -2091,8 +2099,8 @@ static int tag_op_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Error %s creating write request!", plc_tag_decode_error(rc));
 
-        tag_op_set(tag, TAG_OP_IDLE);
-        tag->op_changed_time = time_ms();
+        /* off active_tags, or no other tag on this PLC is sent; phase 1 holds plc->mutex. */
+        idle_tag_unsafe(plc, tag, time_ms());
         tag->write_complete = 1;
         tag->write_in_flight = 0;
         tag->status = (int8_t)rc;
@@ -2118,7 +2126,7 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
     /*
      * Called only after find_response_tag() confirmed a match and response_ready is set.
      * plc->mutex is NOT held here.  pending_request_count is atomic_int32_t so it is
-     * safe to decrement without the mutex even when mb_abort may concurrently do the same.
+     * safe to decrement without the mutex.
      * No need to re-check state regression: reset_plc() already resets all
      * RESPONSE-state tags back to REQUEST state when the connection drops.
      */
@@ -2139,7 +2147,8 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
             tag->pending_transaction_id = 0;
             tag_op_set(tag, (tag_op_get(tag) == TAG_OP_AUTO_WRITE_RESPONSE) ? TAG_OP_AUTO_WRITE_REQUEST : TAG_OP_WRITE_REQUEST);
             tag->op_changed_time = now;
-            tag->op_time = now; /* ensure it fires immediately on next pass */
+            /* fire on the next pass; re-sort so the scans, which stop early, see it. */
+            critical_block(&plc->mutex) { move_tag_sorted(plc, tag, vector_find_index(plc->active_tags, tag), now); }
 
             rc = PLCTAG_STATUS_PENDING;
             break;
@@ -3396,11 +3405,8 @@ int mb_abort(plc_tag_p p_tag) {
     critical_block(&tag->plc->mutex) {
         remove_tag_from_active(tag->plc, tag);
 
-        /* Clear any in-flight request counter slot this tag occupied. */
-        if(tag->pending_transaction_id != 0) {
-            tag->pending_transaction_id = 0;
-            decrement_request_count(tag->plc);
-        }
+        /* orphan any reply; its slot frees when the reply arrives or the connection resets. */
+        tag->pending_transaction_id = 0;
     }
 
     /* Now safe to reset tag state fields with no other thread observing the tag. */
@@ -3734,8 +3740,8 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
             case TAG_OP_READ_RESPONSE: {
                 /* Read is in-flight.  Orphan the response by clearing the
                  * transaction ID -- when tickle_all_tags processes the reply
-                 * the re-verify check will fail and the response is discarded. */
-                decrement_request_count(tag->plc);
+                 * the re-verify check will fail and the response is discarded,
+                 * which frees its slot. */
                 tag->pending_transaction_id = 0;
                 int idx = vector_find_index(tag->plc->active_tags, tag);
 
