@@ -95,6 +95,13 @@ endmacro()
 # Debugging
 # print_all_ar_link_variables()
 
+# libatomic only where 64-bit atomics need it.  Linking it anyway breaks musl-gcc binaries on
+# hosts with no musl libatomic.so.1.
+include(CheckCSourceCompiles)
+check_c_source_compiles("#include <stdatomic.h>
+#include <stdint.h>
+int main(void) { _Atomic int64_t x = 0; return (int)atomic_fetch_add(&x, 1); }" PLCTAG_ATOMICS_WITHOUT_LIB)
+
 # shared library
 # Note: No add_dependencies needed - DEBUG_GENERATED_NAMES_C in sources triggers generation automatically
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
@@ -102,7 +109,9 @@ target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
 # Link atomic library for 64-bit atomic operations on 32-bit ARM
 # Link math library (main library may use sqrt in some places)
 if(UNIX AND NOT APPLE)
-    target_link_libraries(plctag_dyn atomic)
+    if(NOT PLCTAG_ATOMICS_WITHOUT_LIB)
+        target_link_libraries(plctag_dyn atomic)
+    endif()
     target_link_libraries(plctag_dyn m)
 elseif(UNIX)
     # macOS: link math library
@@ -140,7 +149,9 @@ target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
 # Link atomic library for 64-bit atomic operations on 32-bit ARM
 # Link math library (main library may use sqrt in some places)
 if(UNIX AND NOT APPLE)
-    target_link_libraries(plctag_static atomic)
+    if(NOT PLCTAG_ATOMICS_WITHOUT_LIB)
+        target_link_libraries(plctag_static atomic)
+    endif()
     target_link_libraries(plctag_static m)
 elseif(UNIX)
     # macOS: link math library
