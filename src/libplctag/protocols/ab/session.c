@@ -2639,7 +2639,8 @@ int prepare_request(cip_conn_p session) {
         /* set up the connection information */
         conn_req->cpf_targ_conn_id = h2le32(session->targ_connection_id);
 
-        session->conn_seq_num++;
+        /* a 16-bit count that wraps; the cast says so to -fsanitize=implicit-integer-truncation. */
+        session->conn_seq_num = (uint16_t)(session->conn_seq_num + 1);
         conn_req->cpf_conn_seq_num = h2le16(session->conn_seq_num);
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Preparing connected packet with connection ID %x and sequence ID %u(%x)",
