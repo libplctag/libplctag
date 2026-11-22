@@ -48,7 +48,6 @@ void backoff_init(backoff_t *backoff, int64_t initial_ms, int64_t max_ms) {
     backoff->attempts = 0;
     backoff->up = false;
     backoff->up_since_ms = 0;
-    backoff->window_start_ms = 0;
     backoff->window_drops = 0;
 }
 
@@ -114,6 +113,11 @@ extern void backoff_connected(backoff_t *backoff, int64_t now_ms) {
 }
 
 
+extern void backoff_failed(backoff_t *backoff) {
+    backoff->up = false;
+}
+
+
 extern int64_t backoff_retry_wait_ms(backoff_t *backoff, int64_t now_ms) {
     int64_t wait_ms = 0;
 
@@ -125,11 +129,12 @@ extern int64_t backoff_retry_wait_ms(backoff_t *backoff, int64_t now_ms) {
 
     backoff->up = false;
 
-    /* a connection that lasted a whole window was working: start over. */
-    if(now_ms - backoff->up_since_ms >= BACKOFF_RECONNECT_WINDOW_MS) { backoff_reset(backoff); }
-
-    if(now_ms - backoff->window_start_ms >= BACKOFF_RECONNECT_WINDOW_MS) {
-        backoff->window_start_ms = now_ms;
+    /*
+     * a connection that lasted a whole window was working: start over.  Only that clears the drop
+     * count -- a count kept per window would let a steady storm just under the limit go on forever.
+     */
+    if(now_ms - backoff->up_since_ms >= BACKOFF_RECONNECT_WINDOW_MS) {
+        backoff_reset(backoff);
         backoff->window_drops = 0;
     }
 

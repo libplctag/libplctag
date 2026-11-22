@@ -1467,6 +1467,9 @@ static int fo_step(cip_conn_p session, session_sm_t *sm) {
     fo->state = FO_START;
     atomic_set_int32(&session->connection_status_reason, rc);
 
+    /* the PLC answered the Forward Open with an error: a failed connect, not a drop, so the backoff grows. */
+    backoff_failed(&sm->retry_backoff);
+
     if(refused) {
         critical_block(&session->session_mutex) { session->refused_rc = rc; }
         backoff_saturate(&sm->retry_backoff);

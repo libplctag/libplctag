@@ -45,7 +45,7 @@
  * comes up and backoff_retry_wait_ms() each time a connect fails or a connection drops.
  */
 
-/* more drops than this in one window is a reconnect storm: the backoff grows instead of the minimum wait. */
+/* more drops than this with no connection lasting a window is a reconnect storm: the backoff grows instead of the minimum wait. */
 #define BACKOFF_RECONNECT_WINDOW_MS (1000)
 #define BACKOFF_MAX_RECONNECTS_PER_WINDOW (5)
 
@@ -56,8 +56,7 @@ typedef struct {
     uint32_t attempts;  /* consecutive failures; for logging only, never feeds the delay */
     bool up;                 /* a connection came up and has not dropped yet */
     int64_t up_since_ms;     /* when it came up */
-    int64_t window_start_ms; /* the window drops are counted in */
-    uint32_t window_drops;   /* drops in that window */
+    uint32_t window_drops;   /* drops since a connection last lasted a window */
 } backoff_t;
 
 /**
@@ -123,10 +122,17 @@ extern int64_t backoff_wait_ms(backoff_t *backoff);
 extern void backoff_connected(backoff_t *backoff, int64_t now_ms);
 
 /**
+ * @brief Note that what came up was not a working connection after all: the device answered the
+ * connect with an error.  The next backoff_retry_wait_ms() treats it as a failed connect, not a drop.
+ * @param backoff The state to update.
+ */
+extern void backoff_failed(backoff_t *backoff);
+
+/**
  * @brief How long to wait before connecting again, after a failed connect or a dropped connection.
  * No wait is shorter than initial_ms.  A connect that never came up grows the backoff, as
- * backoff_wait_ms() does.  A connection that came up waits initial_ms, unless more than BACKOFF_MAX_RECONNECTS_PER_WINDOW drops fell in the
- * current window: then the backoff grows, never below initial_ms, and keeps growing on every drop
+ * backoff_wait_ms() does.  A connection that came up waits initial_ms, unless more than BACKOFF_MAX_RECONNECTS_PER_WINDOW drops came
+ * with no connection lasting a window in between, however slowly: then the backoff grows, never below initial_ms, and keeps growing on every drop
  * after that.  Only a connection that stayed up a whole window restarts the backoff, so a device
  * that accepts and then drops at once backs off to the maximum and stays there.
  * @param backoff The state to advance.

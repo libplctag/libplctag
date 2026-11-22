@@ -422,6 +422,50 @@ static void test_reconnect_storm_backs_off(void **state) {
 }
 
 
+/* Drops spaced just under the per-window limit, but none lasting a window, still back off. */
+static void test_steady_storm_under_the_limit_backs_off(void **state) {
+    backoff_t backoff;
+    int64_t now = 1000000;
+    int64_t wait_ms = 0;
+    int32_t i = 0;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, TEST_MAX_MS);
+
+    for(i = 0; i < 4 * BACKOFF_MAX_RECONNECTS_PER_WINDOW; i++) {
+        backoff_connected(&backoff, now);
+        now += BACKOFF_RECONNECT_WINDOW_MS / BACKOFF_MAX_RECONNECTS_PER_WINDOW;
+        wait_ms = backoff_retry_wait_ms(&backoff, now);
+        now += wait_ms;
+    }
+
+    assert_true(wait_ms > TEST_INITIAL_MS);
+}
+
+
+/* A connection that came up and was then refused at the protocol level grows like a failed connect. */
+static void test_failed_after_connected_grows(void **state) {
+    backoff_t backoff;
+    int64_t now = 0;
+    int64_t wait_ms = 0;
+    int32_t i = 0;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, TEST_MAX_MS);
+
+    for(i = 0; i < TEST_SATURATED_AFTER; i++) {
+        backoff_connected(&backoff, now);
+        backoff_failed(&backoff);
+        wait_ms = backoff_retry_wait_ms(&backoff, now + 10);
+        now += wait_ms + 10;
+    }
+
+    assert_in_range(wait_ms, TEST_MAX_MS / 2, TEST_MAX_MS);
+}
+
+
 /* A connect that never comes up keeps growing, however slowly the failures come, and never waits under the minimum. */
 static void test_failed_connects_keep_growing(void **state) {
     backoff_t backoff;
@@ -477,6 +521,8 @@ int main(void) {
         cmocka_unit_test(test_occasional_drops_wait_the_minimum),
         cmocka_unit_test(test_reconnect_storm_backs_off),
         cmocka_unit_test(test_failed_connects_keep_growing),
+        cmocka_unit_test(test_steady_storm_under_the_limit_backs_off),
+        cmocka_unit_test(test_failed_after_connected_grows),
         cmocka_unit_test(test_saturate_is_not_undone_by_a_long_connection),
     };
 
