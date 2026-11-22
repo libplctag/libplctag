@@ -1534,6 +1534,10 @@ static phase_t connect_wait_phase(cip_conn_p session, session_sm_t *sm) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Socket connection succeeded.");
     inactivity_restart(session, sm);
 
+    /* the connection is up, as for Modbus: a drop from here on, before idle too, is a drop and not a
+     * failed connect, and the backoff restarts if the connection then lasts (backoff_retry_wait_ms()). */
+    backoff_connected(&sm->retry_backoff, sm->now);
+
     return PHASE_DONE;
 }
 
@@ -1598,9 +1602,7 @@ static phase_t idle_phase(cip_conn_p session, session_sm_t *sm) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
     session_set_connection_status(session, PLCTAG_CONN_STATUS_UP, PLCTAG_STATUS_OK);
 
-    /* reaching idle is the only proof of a working connect: a refusal is forgotten, and the backoff
-     * restarts if the connection then lasts (backoff_retry_wait_ms()). */
-    backoff_connected(&sm->retry_backoff, sm->now);
+    /* reaching idle is the only proof of a working connect: a refusal is forgotten. */
     critical_block(&session->session_mutex) {
         session->refused_rc = PLCTAG_STATUS_OK;
         num_reqs = vector_length(session->requests);
