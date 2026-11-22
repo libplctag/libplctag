@@ -199,6 +199,7 @@ static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc
 static void identify_step(cip_conn_p session, struct session_sm_s *sm);
 static void connected_step(cip_conn_p session, struct session_sm_s *sm);
 static void unconnected_step(cip_conn_p session, struct session_sm_s *sm);
+static uint32_t next_connection_id(void);
 
 
 static mutex_t session_mutex;
@@ -215,6 +216,15 @@ static cip_conn_p sessions = NULL;
  * as there are only 32 bits.
  */
 static atomic_int32_t connection_id = ATOMIC_INT_STATIC_INIT;
+
+/* ++connection_id, atomically, skipping 0 when it wraps: 0 means "not set" in the check that seeds it. */
+static uint32_t next_connection_id(void) {
+    uint32_t id = 0;
+
+    do { id = (uint32_t)atomic_add_int32(&connection_id, 1) + 1; } while(id == 0);
+
+    return id;
+}
 
 
 int session_startup(void) {
@@ -717,8 +727,8 @@ cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, con
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_group_id to %d.", connection_group_id);
     session->connection_group_id = connection_group_id;
 
-    /* ++connection_id, atomically: the Forward Open encoders take the next one on each session's own thread. */
-    session->orig_connection_id = (uint32_t)atomic_add_int32(&connection_id, 1) + 1;
+    /* atomically: the Forward Open encoders take the next one on each session's own thread. */
+    session->orig_connection_id = next_connection_id();
 
     /* create the session mutex. */
     if((rc = mutex_init(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
@@ -3014,7 +3024,7 @@ void encode_plain_forward_open(cip_conn_p session) {
     fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
     /* a fresh ID for every Forward Open, reconnects included; see the comment on connection_id. */
-    session->orig_connection_id = (uint32_t)atomic_add_int32(&connection_id, 1) + 1;
+    session->orig_connection_id = next_connection_id();
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
     session->conn_serial_number = next_conn_serial_number(session->conn_serial_number);
@@ -3104,7 +3114,7 @@ void encode_large_forward_open(cip_conn_p session) {
     fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
     /* a fresh ID for every Forward Open, reconnects included; see the comment on connection_id. */
-    session->orig_connection_id = (uint32_t)atomic_add_int32(&connection_id, 1) + 1;
+    session->orig_connection_id = next_connection_id();
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
     session->conn_serial_number = next_conn_serial_number(session->conn_serial_number);
