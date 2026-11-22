@@ -124,8 +124,8 @@ extern void backoff_connected(backoff_t *backoff, int64_t now_ms);
 
 /**
  * @brief How long to wait before connecting again, after a failed connect or a dropped connection.
- * A connect that never came up grows the backoff, as backoff_wait_ms() does.  A connection that
- * came up waits initial_ms, unless more than BACKOFF_MAX_RECONNECTS_PER_WINDOW drops fell in the
+ * No wait is shorter than initial_ms.  A connect that never came up grows the backoff, as
+ * backoff_wait_ms() does.  A connection that came up waits initial_ms, unless more than BACKOFF_MAX_RECONNECTS_PER_WINDOW drops fell in the
  * current window: then the backoff grows, never below initial_ms, and keeps growing on every drop
  * after that.  Only a connection that stayed up a whole window restarts the backoff, so a device
  * that accepts and then drops at once backs off to the maximum and stays there.

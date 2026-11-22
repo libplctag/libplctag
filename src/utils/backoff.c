@@ -117,7 +117,11 @@ extern void backoff_connected(backoff_t *backoff, int64_t now_ms) {
 extern int64_t backoff_retry_wait_ms(backoff_t *backoff, int64_t now_ms) {
     int64_t wait_ms = 0;
 
-    if(!backoff->up) { return backoff_wait_ms(backoff); }
+    /* a connect that never came up: the backoff grows, but no wait is shorter than the minimum. */
+    if(!backoff->up) {
+        wait_ms = backoff_wait_ms(backoff);
+        return (wait_ms < backoff->initial_ms) ? backoff->initial_ms : wait_ms;
+    }
 
     backoff->up = false;
 
