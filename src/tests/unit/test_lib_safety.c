@@ -40,6 +40,9 @@
  * tag_id shows in the logger.  The test holds its own reference, so the tag stays valid.
  */
 
+/* the release builds cap pdebug() at INFO; these checks count DETAIL lines. */
+#undef PLCTAG_COMPILE_DEBUG_LEVEL
+
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>

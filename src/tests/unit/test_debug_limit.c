@@ -40,6 +40,9 @@
  * the message do not matter: the call site is the key. Sites without the flag always print.
  */
 
+/* the release builds cap pdebug() at INFO; these checks count DETAIL lines. */
+#undef PLCTAG_COMPILE_DEBUG_LEVEL
+
 #include "mini_mock.h"
 
 #include <stdint.h>
