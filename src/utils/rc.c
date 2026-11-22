@@ -79,6 +79,8 @@ typedef struct refcount_t *refcount_p;
  */
 static lock_t cleanup_lock = LOCK_INIT;
 static bool cleanup_running = false;
+/* teardown asked the thread to stop once the queue is empty.  Under cleanup_lock. */
+static bool cleanup_stopping = false;
 static refcount_p cleanup_head = NULL;
 static refcount_p cleanup_tail = NULL;
 static cond_p cleanup_cond = NULL;
@@ -294,7 +296,10 @@ int refcount_startup(void) {
         return rc;
     }
 
-    spin_block(&cleanup_lock) { cleanup_running = true; }
+    spin_block(&cleanup_lock) {
+        cleanup_stopping = false;
+        cleanup_running = true;
+    }
 
     rc = thread_create(&cleanup_thread, refcount_cleanup_thread_func, 32 * 1024, NULL);
     if(rc != PLCTAG_STATUS_OK) {
@@ -326,8 +331,8 @@ int refcount_teardown(void) {
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Shutting down refcount cleanup infrastructure.");
 
-    /* from here on rc_dec() runs destructors itself and nothing signals cleanup_cond. */
-    spin_block(&cleanup_lock) { cleanup_running = false; }
+    /* the thread runs until its queue is empty; only then does rc_dec() run destructors itself. */
+    spin_block(&cleanup_lock) { cleanup_stopping = true; }
 
     if(cleanup_thread) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Waiting for cleanup thread to exit.");
@@ -377,7 +382,11 @@ static refcount_p cleanup_pop(void) {
 static bool cleanup_is_running(void) {
     bool running = false;
 
-    spin_block(&cleanup_lock) { running = cleanup_running; }
+    spin_block(&cleanup_lock) {
+        /* stopping with nothing queued: from here on rc_dec() runs destructors itself. */
+        if(cleanup_stopping && !cleanup_head) { cleanup_running = false; }
+        running = cleanup_running;
+    }
 
     return running;
 }
