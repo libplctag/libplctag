@@ -934,7 +934,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         FD_SET(sock->fd, &err_set);
 
         /* add more depending on the mask. */
-        if(events & SOCK_EVENT_CAN_READ) { FD_SET(sock->fd, &read_set); }
+        /* as on POSIX: a peer close shows only as readable, so a DISCONNECT wait must watch for reads too. */
+        if(events & (SOCK_EVENT_CAN_READ | SOCK_EVENT_DISCONNECT)) { FD_SET(sock->fd, &read_set); }
 
         if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) { FD_SET(sock->fd, &write_set); }
     }
@@ -1002,7 +1003,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
                 } else {
                     /* Some other error occurred on the socket */
                     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "recv() with MSG_PEEK error %d on socket.", recv_err);
-                    result |= (events & SOCK_EVENT_ERROR);
+                    /* a killed peer resets the connection: that is a disconnect too, as on POSIX. */
+                    result |= (events & (SOCK_EVENT_ERROR | SOCK_EVENT_DISCONNECT));
                 }
             }
         }
