@@ -158,7 +158,13 @@ int main(int argc, char **argv) {
     plc_tag_shutdown();
     shutdown_ms = compat_time_ms() - start_ms;
 
+    /* a joined thread can linger in the count for a moment, as above, so give it up to a second
+     * to leave.  A thread still running after that was never joined. */
     threads_after = thread_count();
+    for(int32_t tries = 0; threads_after > threads_before && tries < 100; tries++) {
+        compat_sleep_ms(10, NULL);
+        threads_after = thread_count();
+    }
 
     fprintf(stderr, "plc_tag_shutdown() took %" PRId64 " ms (limit %" PRId64 " ms).\n", shutdown_ms, max_ms);
 
