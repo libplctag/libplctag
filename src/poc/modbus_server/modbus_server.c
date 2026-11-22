@@ -139,6 +139,8 @@ struct server_ctx_s {
     bool reorder;         /* answer a pipelined request before the one ahead of it */
     int64_t close_every;  /* drop the connection, unanswered, on every Nth request; 0 = never */
     int64_t requests_seen;
+    int64_t max_in_flight;  /* --max-in-flight: report more unanswered requests than this; 0 = off */
+    int64_t most_in_flight; /* the most unanswered requests seen at once */
 
     /* --delay-ms: hold every response this long after its request arrives, and the delay applied. */
     int64_t delay_us;
@@ -368,6 +370,51 @@ static util_err_t modbus_frame_check(buf_t *buf, void *context) {
 }
 
 
+/* whole requests waiting in the buffer behind the one being answered. */
+static int64_t frames_waiting(buf_t *buf) {
+    const uint8_t *data = buf_data(buf);
+    size_t pos = buf_read_pos(buf);
+    size_t end = buf_write_pos(buf);
+    int64_t count = 0;
+
+    while(end - pos >= 6) {
+        size_t frame_size = (size_t)6 + (((size_t)data[pos + 4] << 8) | data[pos + 5]);
+
+        if(end - pos < frame_size) { break; }
+
+        pos += frame_size;
+        count++;
+    }
+
+    return count;
+}
+
+
+/* --random-fill: n pseudo-random bytes, xorshift32 on *state, which must not be 0. */
+static void fill_random(uint8_t *bytes, size_t n, uint32_t *state) {
+    for(size_t i = 0; bytes && i < n; i++) {
+        *state ^= *state << 13;
+        *state ^= *state >> 17;
+        *state ^= *state << 5;
+        bytes[i] = (uint8_t)*state;
+    }
+}
+
+
+/* --max-in-flight: the client may not have more than max_in_flight requests unanswered. */
+static void check_in_flight(server_ctx_t *server, int64_t in_flight) {
+    if(in_flight > server->most_in_flight) {
+        server->most_in_flight = in_flight;
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Requests in flight: new high of %" PRId64 ".", in_flight);
+    }
+
+    if(in_flight > server->max_in_flight) {
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Over the limit: %" PRId64 " requests in flight, the limit is %" PRId64 ".",
+              in_flight, server->max_in_flight);
+    }
+}
+
+
 static void client_handler(coro_task_handle_t handle, socket_t fd, void *context) {
     modbus_client_t *client = (modbus_client_t *)context;
     uint8_t function_code;
@@ -505,6 +552,12 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
             if(util_mono_us() < client->delay_deadline_us) { coro_wait_until(handle, client->delay_deadline_us); }
             client->server->delay_applied_us += util_mono_us() - client->delay_start_us;
             client->server->delay_count++;
+        }
+
+        /* --max-in-flight: this request is unanswered, and so is every whole one queued behind it. */
+        if(client->server->max_in_flight > 0) {
+            (void)socket_recv_buf(fd, &client->recv_buf);
+            check_in_flight(client->server, 1 + frames_waiting(&client->recv_buf));
         }
 
         /* Capture send start time */
@@ -732,6 +785,20 @@ int main(int argc, char *argv[]) {
          "fault.close_every",
          "Close the connection without answering on every Nth request (0 = never)",
          {.has_default = true, .value.int_val = 0}},
+        {"random-fill",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "modbus.random_fill",
+         "Start every coil and register with pseudo-random values from this seed, to find tests that expect zeros (0 = off)",
+         {.has_default = true, .value.int_val = 0}},
+        {"max-in-flight",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.max_in_flight",
+         "Log a warning when more than this many requests are unanswered at once (0 = off)",
+         {.has_default = true, .value.int_val = 0}},
         {"help",
          ARGS_TYPE_BOOL,
          ARGS_OPTIONAL,
@@ -794,8 +861,22 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     server.storage = temp_storage;
+
+    if(args_get_int(&args_result, "random-fill") != 0) {
+        uint32_t state = (uint32_t)args_get_int(&args_result, "random-fill");
+
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Filling coils and registers with pseudo-random values from seed %u.",
+              (unsigned int)state);
+        if(temp_storage->coils) { fill_random(temp_storage->coils->bytes, temp_storage->coils->byte_count, &state); }
+        if(temp_storage->discrete_inputs) {
+            fill_random(temp_storage->discrete_inputs->bytes, temp_storage->discrete_inputs->byte_count, &state);
+        }
+        fill_random((uint8_t *)temp_storage->holding_registers, temp_storage->num_holding_registers * sizeof(uint16_t), &state);
+        fill_random((uint8_t *)temp_storage->input_registers, temp_storage->num_input_registers * sizeof(uint16_t), &state);
+    }
     server.reorder = args_get_bool(&args_result, "reorder");
     server.close_every = args_get_int(&args_result, "close-every");
+    server.max_in_flight = args_get_int(&args_result, "max-in-flight");
 
     double delay_ms = args_get_float(&args_result, "delay-ms");
     if(!(delay_ms >= 0.0 && delay_ms <= 3600000.0)) {
