@@ -1235,8 +1235,11 @@ THREAD_FUNC(modbus_plc_handler) {
                     }
                 }
 
-                /* a closed connection can still hold answers: read them first.  The read hits EOF once they are gone. */
-                if((sock_events & SOCK_EVENT_DISCONNECT) && (sock_events & SOCK_EVENT_CAN_READ) && !(sock_events & SOCK_EVENT_ERROR)) {
+                /*
+                 * a closed connection can still hold answers: read them first.  The read hits EOF once they are gone.
+                 * A reset is reported as an error as well, and still leaves what arrived before it to read.
+                 */
+                if((sock_events & SOCK_EVENT_DISCONNECT) && (sock_events & SOCK_EVENT_CAN_READ)) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Peer closed the connection; reading the responses it sent first.");
                     plc->state = PLC_RECEIVE_RESPONSE;
                     break;
