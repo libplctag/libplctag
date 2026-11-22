@@ -208,6 +208,7 @@ int main(int argc, const char **argv) {
     udp_server = udp_server_start((plc.port_str ? plc.port_str : "44818"), &plc, &done);
     if(!udp_server) { log_error("Unable to answer ListIdentity over UDP; continuing without it."); }
 
+    tcp_server_set_startup_close_ms(server, plc.startup_close_ms);
     tcp_server_start(server, &done);
 
     udp_server_destroy(udp_server);
@@ -288,6 +289,9 @@ void usage(void) {
                     "        --supported_size=<n>   the size offered by --reject_size.  Defaults to 508.\n"
                     "        --no_large_fo          refuse every Large Forward Open with 0x08, service not\n"
                     "                               supported.\n"
+                    "        --startup-close-ms=<ms> for <ms> milliseconds after startup, accept every\n"
+                    "                               connection and close it at once, as some PLCs do while\n"
+                    "                               they start up.\n"
                     "        --link_offline=<n>     fail the next <n> ForwardOpen requests with extended status\n"
                     "                               0x0800, \"network link offline\".\n"
                     "        --out_of_connections=<n> fail the next <n> ForwardOpen requests with extended\n"
@@ -386,6 +390,13 @@ static const args_flag_def_t arg_flags[] = {
      ARGS_ONCE,
      "empty_frag",
      "Answer the first <count> read requests with a partial-transfer status and no data",
+     {.has_default = true, .value.int_val = 0}},
+    {"startup-close-ms",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "startup-close-ms",
+     "For <ms> milliseconds after startup, accept every connection and close it at once",
      {.has_default = true, .value.int_val = 0}},
     {"no_large_fo",
      ARGS_TYPE_BOOL,
@@ -590,6 +601,7 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
     }
 
     plc->no_large_fo = args_get_bool(&args, "no_large_fo");
+    plc->startup_close_ms = args_get_int(&args, "startup-close-ms");
 
     log_info("Setting the size offered with a 0x0109 rejection to %d.", (int)args_get_int(&args, "supported_size"));
     plc->reject_size_supported = (uint16_t)args_get_int(&args, "supported_size");

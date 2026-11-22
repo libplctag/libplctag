@@ -55,6 +55,7 @@ struct tcp_server {
     tcp_server_handler_t handler;
     void *context;
     size_t context_size;
+    int64_t startup_close_until_us; /* --startup-close-ms: until then, every connection is closed at once */
 };
 
 struct client_session {
@@ -100,6 +101,11 @@ tcp_server_p tcp_server_create(const char *host, const char *port,
     return server;
 }
 
+extern void tcp_server_set_startup_close_ms(tcp_server_p server, int64_t startup_close_ms) {
+    server->startup_close_until_us = (startup_close_ms > 0) ? util_time_us() + startup_close_ms * 1000 : 0;
+}
+
+
 void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
     static bool done; /* static so it doesn't go out of scope, since it's passed to sub-threads. */
     done = false;     /* initialised every invocation for logic sake, even though that's once. */
@@ -110,7 +116,12 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
         SOCKET client_fd = INVALID_SOCKET;
         int32_t accept_status = socket_accept(server->sock_fd, 1000, &client_fd); /* MAGIC */
 
-        if(accept_status == PLCTAG_STATUS_OK) {
+        if(accept_status == PLCTAG_STATUS_OK && util_time_us() < server->startup_close_until_us) {
+            /* a PLC still starting up: it takes the connection and drops it. */
+            log_info("Fault: closing the connection at once, %lldms of --startup-close-ms left.",
+                     (long long)((server->startup_close_until_us - util_time_us()) / 1000));
+            socket_close(client_fd);
+        } else if(accept_status == PLCTAG_STATUS_OK) {
             /* The client thread is responsible for freeing these */
             struct client_session *session = calloc(1, sizeof(*session));
             void *context = calloc(1, server->context_size);

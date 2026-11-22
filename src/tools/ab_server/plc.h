@@ -300,6 +300,9 @@ typedef struct plc_s {
     /* refuse every Large Forward Open (0x5B) with 0x08, service not supported. */
     bool no_large_fo;
 
+    /* for this many milliseconds after startup, accept every connection and close it at once. */
+    int64_t startup_close_ms;
+
     /*
      * One counter per fault_kind_t, for the deliberate response corruptions behind --corrupt.
      * Shared across every connection's copy of this struct, as above.

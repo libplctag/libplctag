@@ -56,5 +56,7 @@ typedef byte_slice_t (*tcp_server_handler_t)(byte_slice_t input, byte_slice_t ou
 
 extern tcp_server_p tcp_server_create(const char *host, const char *port, tcp_server_handler_t handler, void *context,
                                       size_t context_size);
+/* --startup-close-ms: for this long from now, accept every connection and close it at once. */
+extern void tcp_server_set_startup_close_ms(tcp_server_p server, int64_t startup_close_ms);
 extern void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate);
 extern void tcp_server_destroy(tcp_server_p server);
