@@ -1582,8 +1582,9 @@ static phase_t idle_phase(cip_conn_p session, session_sm_t *sm) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
     session_set_connection_status(session, PLCTAG_CONN_STATUS_UP, PLCTAG_STATUS_OK);
 
-    /* reaching idle is the only proof of a working connect: the backoff restarts and a refusal is forgotten. */
-    backoff_reset(&sm->retry_backoff);
+    /* reaching idle is the only proof of a working connect: a refusal is forgotten, and the backoff
+     * restarts if the connection then lasts (backoff_retry_wait_ms()). */
+    backoff_connected(&sm->retry_backoff, sm->now);
     critical_block(&session->session_mutex) {
         session->refused_rc = PLCTAG_STATUS_OK;
         num_reqs = vector_length(session->requests);
@@ -1677,7 +1678,7 @@ static void close_socket_phase(cip_conn_p session, session_sm_t *sm) {
 
     /* the cap is a live attribute, so it is read on every retry. */
     backoff_set_max_ms(&sm->retry_backoff, atomic_get_int32(&session->connection_retry_max_delay_ms));
-    retry_wait_ms = backoff_wait_ms(&sm->retry_backoff);
+    retry_wait_ms = backoff_retry_wait_ms(&sm->retry_backoff, sm->now);
     sm->timeout_time = sm->now + retry_wait_ms;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.",
