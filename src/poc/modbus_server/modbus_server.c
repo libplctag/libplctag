@@ -138,6 +138,8 @@ struct server_ctx_s {
     /* fault injection for client tests */
     bool reorder;         /* answer a pipelined request before the one ahead of it */
     int64_t close_every;  /* drop the connection, unanswered, on every Nth request; 0 = never */
+    int64_t close_after_bytes; /* send this many bytes on a connection, cutting a response short, then close; 0 = never */
+    int64_t startup_close_ms;  /* for this long after startup, accept every connection and close it at once; 0 = never */
     int64_t requests_seen;
     int64_t max_in_flight;  /* --max-in-flight: report more unanswered requests than this; 0 = off */
     int64_t most_in_flight; /* the most unanswered requests seen at once */
@@ -171,6 +173,11 @@ struct modbus_client_s {
     /* --delay-ms: when this response may go out (util_mono_us) and when its request arrived. */
     int64_t delay_start_us;
     int64_t delay_deadline_us;
+
+    /* --close-after-bytes: bytes sent on this connection so far, and close once this reply is out.
+     * In the client, not locals: a coroutine's locals do not survive coro_yield(). */
+    int64_t bytes_sent;
+    bool close_after_send;
 };
 
 
@@ -563,11 +570,31 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         /* Capture send start time */
         client->timing.send_start_us = util_time_us();
 
+        /* --close-after-bytes: send only what is left of the allowance, then close mid-response. */
+        client->close_after_send = false;
+        if(client->server->close_after_bytes > 0) {
+            int64_t size = (int64_t)buf_read_size(&client->send_buf);
+            int64_t left = client->server->close_after_bytes - client->bytes_sent;
+
+            if(size >= left) {
+                (void)buf_cut(&client->send_buf, (size_t)left, (size_t)(size - left));
+                client->close_after_send = true;
+            }
+
+            client->bytes_sent += (size < left) ? size : left;
+        }
+
         /* Send response */
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
         while((err = socket_send_buf(fd, &client->send_buf)) == UTIL_EAGAIN) { coro_yield(handle, CORO_EVENT_WRITE); }
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
+            break;
+        }
+
+        if(client->close_after_send) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Fault: closing the connection after %" PRId64 " bytes sent.",
+                  client->bytes_sent);
             break;
         }
 
@@ -660,6 +687,15 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to accept connection");
             break;
+        }
+
+        /* --startup-close-ms: a PLC still starting up takes the connection and drops it. */
+        if(util_time_us() < listener->server->start_time_us + listener->server->startup_close_ms * 1000) {
+            pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Fault: closing the connection at once, %" PRId64
+                  "ms of --startup-close-ms left.",
+                  (listener->server->start_time_us + listener->server->startup_close_ms * 1000 - util_time_us()) / 1000);
+            CS_CLOSE(client_fd);
+            continue;
         }
 
         char client_ip[INET6_ADDRSTRLEN];
@@ -785,6 +821,20 @@ int main(int argc, char *argv[]) {
          "fault.close_every",
          "Close the connection without answering on every Nth request (0 = never)",
          {.has_default = true, .value.int_val = 0}},
+        {"startup-close-ms",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.startup_close_ms",
+         "For this many milliseconds after startup, accept every connection and close it at once, as some PLCs do while they start up (0 = never)",
+         {.has_default = true, .value.int_val = 0}},
+        {"close-after-bytes",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.close_after_bytes",
+         "Send this many bytes on each connection, cutting a response short if needed, then close it (0 = never)",
+         {.has_default = true, .value.int_val = 0}},
         {"random-fill",
          ARGS_TYPE_INT,
          ARGS_OPTIONAL,
@@ -876,6 +926,8 @@ int main(int argc, char *argv[]) {
     }
     server.reorder = args_get_bool(&args_result, "reorder");
     server.close_every = args_get_int(&args_result, "close-every");
+    server.close_after_bytes = args_get_int(&args_result, "close-after-bytes");
+    server.startup_close_ms = args_get_int(&args_result, "startup-close-ms");
     server.max_in_flight = args_get_int(&args_result, "max-in-flight");
 
     double delay_ms = args_get_float(&args_result, "delay-ms");
