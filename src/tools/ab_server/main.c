@@ -84,6 +84,7 @@ static byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byt
 static atomic_int32_t g_dup_conn_id_tries;
 static atomic_int32_t g_empty_frag_count;
 static atomic_int32_t g_no_reply_count;
+static atomic_int32_t g_connected_requests_seen;
 static atomic_int32_t g_reject_size_count;
 static atomic_int32_t g_link_offline_count;
 static atomic_int32_t g_out_of_conn_count;
@@ -184,6 +185,7 @@ int main(int argc, const char **argv) {
     plc.dup_conn_id_tries = &g_dup_conn_id_tries;
     plc.empty_frag_count = &g_empty_frag_count;
     plc.no_reply_count = &g_no_reply_count;
+    plc.connected_requests_seen = &g_connected_requests_seen;
     plc.reject_size_count = &g_reject_size_count;
     plc.link_offline_count = &g_link_offline_count;
     plc.out_of_conn_count = &g_out_of_conn_count;
@@ -288,7 +290,11 @@ void usage(void) {
                     "                               size for the client to retry with.\n"
                     "        --supported_size=<n>   the size offered by --reject_size.  Defaults to 508.\n"
                     "        --no_large_fo          refuse every Large Forward Open with 0x08, service not\n"
-                    "                               supported.\n"
+                    "                               supported.\n");
+    /* NOLINTNEXTLINE */
+    fprintf(stderr, "        --close-every=<n>      close the connection without answering on every <n>th\n"
+                    "                               connected CIP request.  Session setup and ForwardOpen\n"
+                    "                               go through, so the client was connected.\n"
                     "        --startup-close-ms=<ms> for <ms> milliseconds after startup, accept every\n"
                     "                               connection and close it at once, as some PLCs do while\n"
                     "                               they start up.\n"
@@ -391,6 +397,13 @@ static const args_flag_def_t arg_flags[] = {
      "empty_frag",
      "Answer the first <count> read requests with a partial-transfer status and no data",
      {.has_default = true, .value.int_val = 0}},
+    {"close-every",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "close-every",
+     "Close the connection without answering on every Nth connected CIP request",
+     {.has_default = true, .value.int_val = 0}},
     {"startup-close-ms",
      ARGS_TYPE_INT,
      ARGS_OPTIONAL,
@@ -479,6 +492,7 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
     atomic_store_int32(plc->dup_conn_id_tries, 0);
     atomic_store_int32(plc->empty_frag_count, 0);
     atomic_store_int32(plc->no_reply_count, 0);
+    atomic_store_int32(plc->connected_requests_seen, 0);
     atomic_store_int32(plc->reject_size_count, 0);
     atomic_store_int32(plc->link_offline_count, 0);
     atomic_store_int32(plc->out_of_conn_count, 0);
@@ -602,6 +616,7 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
 
     plc->no_large_fo = args_get_bool(&args, "no_large_fo");
     plc->startup_close_ms = args_get_int(&args, "startup-close-ms");
+    plc->close_every = (int32_t)args_get_int(&args, "close-every");
 
     log_info("Setting the size offered with a 0x0109 rejection to %d.", (int)args_get_int(&args, "supported_size"));
     plc->reject_size_supported = (uint16_t)args_get_int(&args, "supported_size");
@@ -1394,6 +1409,16 @@ byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice
 
     rest = byte_slice_take(input, EIP_HEADER_SIZE + eip_len, &packet);
     if(byte_slice_has_error(rest)) { return input; }
+
+    /* --close-every: drop the connection before the request is acted on. */
+    if(eip_command == EIP_CONNECTED_SEND && plc->close_every > 0) {
+        int32_t seen = atomic_inc_int32(plc->connected_requests_seen);
+
+        if(seen % plc->close_every == 0) {
+            log_info("Fault: closing the connection unanswered on request %d.", (int)seen);
+            return byte_slice_fail(rest, PLCTAG_ERR_CLOSE);
+        }
+    }
 
     resp = eip_dispatch_request(packet, output, plc);
 
