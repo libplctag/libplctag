@@ -367,6 +367,99 @@ static void test_raising_the_max_lets_growth_resume(void **state) {
 }
 
 
+/* A connection that worked for a while and then dropped reconnects after the minimum wait, every time. */
+static void test_occasional_drops_wait_the_minimum(void **state) {
+    backoff_t backoff;
+    int64_t now = 0;
+    int32_t i = 0;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, TEST_MAX_MS);
+
+    for(i = 0; i < 20; i++) {
+        backoff_connected(&backoff, now);
+        now += 2 * BACKOFF_RECONNECT_WINDOW_MS;
+        assert_int_equal(backoff_retry_wait_ms(&backoff, now), TEST_INITIAL_MS);
+    }
+}
+
+
+/*
+ * A device that accepts and drops at once: the first drops in a window wait the minimum, the
+ * one past the limit starts the backoff, and from then on every drop waits longer, up to the
+ * maximum, however the drops fall across windows.  A connection that then lasts a window
+ * starts over.
+ */
+static void test_reconnect_storm_backs_off(void **state) {
+    backoff_t backoff;
+    int64_t now = 1000000;
+    int64_t wait_ms = 0;
+    int32_t i = 0;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, TEST_MAX_MS);
+
+    for(i = 0; i < BACKOFF_MAX_RECONNECTS_PER_WINDOW; i++) {
+        backoff_connected(&backoff, now);
+        assert_int_equal(backoff_retry_wait_ms(&backoff, now + 1), TEST_INITIAL_MS);
+        now += 10;
+    }
+
+    for(i = 0; i < TEST_SATURATED_AFTER; i++) {
+        backoff_connected(&backoff, now);
+        wait_ms = backoff_retry_wait_ms(&backoff, now + 1);
+        assert_in_range(wait_ms, TEST_INITIAL_MS, TEST_MAX_MS);
+        now += wait_ms + 1;
+    }
+
+    /* saturated, even though each drop now falls in a window of its own. */
+    assert_in_range(wait_ms, TEST_MAX_MS / 2, TEST_MAX_MS);
+
+    backoff_connected(&backoff, now);
+    assert_int_equal(backoff_retry_wait_ms(&backoff, now + BACKOFF_RECONNECT_WINDOW_MS), TEST_INITIAL_MS);
+}
+
+
+/* A connect that never comes up keeps growing, however slowly the failures come, and never waits under the minimum. */
+static void test_failed_connects_keep_growing(void **state) {
+    backoff_t backoff;
+    int64_t now = 0;
+    int64_t wait_ms = 0;
+    int32_t i = 0;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, TEST_MAX_MS);
+
+    /* the first draw is from [initial/2, initial]; the minimum lifts it to initial. */
+    assert_int_equal(backoff_retry_wait_ms(&backoff, now), TEST_INITIAL_MS);
+
+    for(i = 0; i < TEST_SATURATED_AFTER; i++) {
+        wait_ms = backoff_retry_wait_ms(&backoff, now);
+        assert_in_range(wait_ms, TEST_INITIAL_MS, TEST_MAX_MS);
+        now += 10 * BACKOFF_RECONNECT_WINDOW_MS;
+    }
+
+    assert_in_range(wait_ms, TEST_MAX_MS / 2, TEST_MAX_MS);
+}
+
+
+/* A refusal after a long connection keeps its saturated wait instead of starting over. */
+static void test_saturate_is_not_undone_by_a_long_connection(void **state) {
+    backoff_t backoff;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, TEST_MAX_MS);
+
+    backoff_connected(&backoff, 0);
+    backoff_saturate(&backoff);
+    assert_in_range(backoff_retry_wait_ms(&backoff, 10 * BACKOFF_RECONNECT_WINDOW_MS), TEST_MAX_MS / 2, TEST_MAX_MS);
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_saturate_jumps_to_the_ceiling),
@@ -381,6 +474,10 @@ int main(void) {
         cmocka_unit_test(test_saturated_waits_still_vary),
         cmocka_unit_test(test_degenerate_bounds_are_clamped),
         cmocka_unit_test(test_modbus_bounds_behave_the_same),
+        cmocka_unit_test(test_occasional_drops_wait_the_minimum),
+        cmocka_unit_test(test_reconnect_storm_backs_off),
+        cmocka_unit_test(test_failed_connects_keep_growing),
+        cmocka_unit_test(test_saturate_is_not_undone_by_a_long_connection),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
