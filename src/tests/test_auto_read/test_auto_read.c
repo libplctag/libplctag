@@ -84,7 +84,7 @@
  * Callbacks suppress statistics accumulation until this flag is set so that
  * early-created tags do not accumulate more reads than late-created ones.
  */
-static volatile int recording = 0;
+static compat_atomic_int32_t recording; /* zero-initialized: not recording */
 
 
 /*--- Per-tag statistics ---*/
@@ -133,7 +133,7 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
         case PLCTAG_EVENT_CREATED: compat_atomic_store_int64(&s->ready_time, compat_time_ms()); break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            if(status == PLCTAG_STATUS_OK && recording) {
+            if(status == PLCTAG_STATUS_OK && compat_atomic_load_int32(&recording)) {
                 int64_t now = compat_time_ms();
                 int64_t last = compat_atomic_load_int64(&s->last_read_ms);
 
@@ -336,11 +336,11 @@ int main(int argc, char **argv) {
     double cpu_start = get_cpu_time_ms();
     int64_t wall_start = compat_time_ms();
 
-    recording = 1; /* callbacks begin accumulating stats */
+    compat_atomic_store_int32(&recording, 1); /* callbacks begin accumulating stats */
 
     compat_sleep_ms((uint32_t)(duration_s * 1000), NULL);
 
-    recording = 0; /* stop accumulating before destroying tags */
+    compat_atomic_store_int32(&recording, 0); /* stop accumulating before destroying tags */
 
     int64_t wall_end = compat_time_ms();
     double cpu_end = get_cpu_time_ms();

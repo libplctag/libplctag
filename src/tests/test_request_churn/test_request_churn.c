@@ -41,8 +41,9 @@
  * requests every way there is (reply, abort while queued, abort on the wire, destroy) and reuses
  * each tag's spare request.  Run it under ASan, where a spare request is poisoned.
  *
- * Tag i only ever writes value_for(i), so a read that succeeds returns 0 (never written) or
- * value_for(i).  Anything else is a reply that landed in the wrong request.
+ * Tag i is set to value_for(i) before the churn starts and only ever writes that value, so a
+ * read that succeeds returns value_for(i).  Anything else is a reply that landed in the wrong
+ * request.  The setup write matters on a real PLC, where earlier tests leave their own values.
  *
  * Usage: test_request_churn "<base tag string>" <name> <tags> <threads> <seconds>
  *   Tag i is <name>[i], one DINT.  A PCCC data file name ending in ':' (N7:) gives N7:<i>, one INT.
@@ -136,8 +137,8 @@ static void one_op(worker_t *w) {
 
             compat_atomic_inc_int32(&completed_reads);
 
-            if(val != 0 && val != value_for(i) && compat_atomic_inc_int32(&mismatches) <= MAX_REPORTED) {
-                printf("FAIL: tag %" PRId32 " read 0x%08" PRIx32 ", expected 0 or 0x%08" PRIx32 ".\n", i, (uint32_t)val,
+            if(val != value_for(i) && compat_atomic_inc_int32(&mismatches) <= MAX_REPORTED) {
+                printf("FAIL: tag %" PRId32 " read 0x%08" PRIx32 ", expected 0x%08" PRIx32 ".\n", i, (uint32_t)val,
                        (uint32_t)value_for(i));
             }
         }
@@ -208,6 +209,18 @@ int main(int argc, char **argv) {
 
         if(tags[i] < 0) {
             printf("FAIL: unable to create tag %" PRId32 ": %s.\n", i, plc_tag_decode_error(tags[i]));
+            return 1;
+        }
+
+        /* whatever an earlier test left there is replaced. */
+        if(pccc) {
+            plc_tag_set_int16(tags[i], 0, (int16_t)value_for(i));
+        } else {
+            plc_tag_set_int32(tags[i], 0, value_for(i));
+        }
+
+        if(plc_tag_write(tags[i], CREATE_TIMEOUT) != PLCTAG_STATUS_OK) {
+            printf("FAIL: unable to set tag %" PRId32 " to 0x%08" PRIx32 ".\n", i, (uint32_t)value_for(i));
             return 1;
         }
     }

@@ -74,6 +74,7 @@
 
 
 static int32_t thread_count(void);
+static void *noop_thread(void *arg);
 static bool wait_all(const int32_t *tags, int32_t num_tags, const char *what);
 
 
@@ -104,8 +105,21 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* count before the library starts any thread of its own. */
+    /* start and join one thread first: a sanitizer runtime adds its own helper thread on the
+     * first thread create, and that one must be in the before count. */
+    {
+        compat_thread_t warmup;
+        if(compat_thread_create(&warmup, noop_thread, NULL) == 0) { compat_thread_join(warmup, NULL); }
+    }
+
+    /* count before the library starts any thread of its own.  A joined thread can linger in
+     * the count for a moment, so count again until it stops falling. */
     threads_before = thread_count();
+    for(int32_t prev = threads_before + 1; threads_before >= 0 && threads_before < prev;) {
+        prev = threads_before;
+        compat_sleep_ms(10, NULL);
+        threads_before = thread_count();
+    }
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
@@ -168,6 +182,9 @@ int main(int argc, char **argv) {
 
     return ok ? 0 : 1;
 }
+
+
+static void *noop_thread(void *arg) { return arg; }
 
 
 /* the number of threads in this process, or -1 where it cannot be counted. */

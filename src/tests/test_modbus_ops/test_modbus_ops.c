@@ -49,6 +49,15 @@
  *                 so the transaction ID wraps; every value checks.
  *   auto-dirty    a tag with auto-sync read and write gets new data while its reads run;
  *                 each value reaches the server, and every STARTED had its completion.
+ *   write-readonly  a write to an input register fails to build; the tag must leave the
+ *                 PLC's list, so the idle connection disconnects and stays down (issue 7).
+ *   split-pipelined a read split over two requests runs with more reads than request
+ *                 slots; the partial reply must not leave the tag ahead of the others in
+ *                 flight, or the next reply is discarded and its tag never completes (issue 8).
+ *                 Run with max_requests_in_flight above 1 and --count above it.
+ *   expire-busy   --count tags get destroy_tag_after_idle_sec at once, and a read holds the
+ *                 only request slot across their idle limit; all are destroyed on time
+ *                 (issue 14).  Run against a server that delays every reply by 2000ms.
  *
  * Tag i is holding register hr<i>, with value_of(i, round).
  *
@@ -72,6 +81,14 @@
 #define TID_WRAP_REQUESTS (66000)
 #define AUTO_DIRTY_ROUNDS (40)
 #define AUTO_REGISTER (90)
+#define SPLIT_ROUNDS (200)
+#define SPLIT_ELEMS (140)       /* holding registers 0-139: two requests */
+#define SPLIT_SMALL_BASE (150)  /* the other reads, from holding register 150 */
+#define IDLE_DISCONNECT_MS (500)
+#define IDLE_HOLD_MS (1500)
+#define EXPIRE_SEC (10)         /* the smallest destroy_tag_after_idle_sec allowed */
+#define EXPIRE_SLACK_MS (1000)
+#define BUSY_REGISTER (99)
 
 typedef struct {
     compat_atomic_int32_t read_started;
@@ -86,6 +103,10 @@ static int32_t run_abort_storm(const char *base, int32_t count);
 static int32_t run_write_read(const char *base);
 static int32_t run_tid_wrap(const char *base, int32_t count);
 static int32_t run_auto_dirty(const char *base);
+static int32_t run_write_readonly(const char *base);
+static int32_t run_split_pipelined(const char *base, int32_t count);
+static int32_t run_expire_busy(const char *base, int32_t count);
+static int32_t create_tag(const char *base, const char *name_and_count);
 static int32_t create_reg(const char *base, int32_t reg, const char *extra, event_counts_t *counts);
 static int32_t wait_not_pending(const int32_t *tag_ids, int32_t count, int32_t timeout_ms);
 static int32_t check_reg(int32_t id, int32_t reg, int16_t expected);
@@ -116,7 +137,8 @@ int main(int argc, char **argv) {
     }
 
     if(!mode || !base || count < 1 || count > MAX_TAGS) {
-        printf("Usage: test_modbus_ops --mode=<pipelined|abort-storm|write-read|tid-wrap|auto-dirty> "
+        printf("Usage: test_modbus_ops --mode=<pipelined|abort-storm|write-read|tid-wrap|auto-dirty|write-readonly|"
+               "split-pipelined|expire-busy> "
                "--base=\"<tag string>\" [--count=1..%d]\n",
                MAX_TAGS);
         return 1;
@@ -137,6 +159,12 @@ int main(int argc, char **argv) {
         failures = run_tid_wrap(base, count);
     } else if(strcmp(mode, "auto-dirty") == 0) {
         failures = run_auto_dirty(base);
+    } else if(strcmp(mode, "write-readonly") == 0) {
+        failures = run_write_readonly(base);
+    } else if(strcmp(mode, "split-pipelined") == 0) {
+        failures = run_split_pipelined(base, count);
+    } else if(strcmp(mode, "expire-busy") == 0) {
+        failures = run_expire_busy(base, count);
     } else {
         printf("Unknown mode %s.\n", mode);
         return 1;
@@ -352,6 +380,206 @@ static int32_t run_auto_dirty(const char *base) {
     plc_tag_destroy(plain_id);
 
     return failures;
+}
+
+
+static int32_t run_write_readonly(const char *base) {
+    char extra[ATTR_LEN];
+    int32_t failures = 0;
+    int32_t ro_id = 0;
+    int32_t rw_id = 0;
+    int32_t rc = PLCTAG_STATUS_OK;
+    int32_t status = 0;
+    int64_t end = 0;
+
+    compat_snprintf(extra, sizeof(extra), "elem_count=1&name=ir0&connection_inactivity_timeout_ms=%d", IDLE_DISCONNECT_MS);
+    ro_id = create_tag(base, extra);
+    compat_snprintf(extra, sizeof(extra), "elem_count=1&name=hr5&connection_inactivity_timeout_ms=%d", IDLE_DISCONNECT_MS);
+    rw_id = create_tag(base, extra);
+
+    if(ro_id < 0 || rw_id < 0) { return 1; }
+
+    /* no timeout: a synchronous write aborts the tag on error, and the abort would clean up. */
+    rc = plc_tag_write(ro_id, 0);
+    if(rc == PLCTAG_STATUS_PENDING) {
+        if(wait_not_pending(&ro_id, 1, DATA_TIMEOUT) != PLCTAG_STATUS_OK) { failures++; }
+        rc = plc_tag_status(ro_id);
+    }
+    if(rc == PLCTAG_STATUS_OK || rc == PLCTAG_ERR_TIMEOUT) {
+        printf("FAIL: the input register write returned %s, expected a build error.\n", plc_tag_decode_error(rc));
+        failures++;
+    }
+
+    rc = plc_tag_read(rw_id, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("FAIL: the holding register read after the failed write returned %s.\n", plc_tag_decode_error(rc));
+        failures++;
+    }
+
+    /* nothing is queued, so the connection idles out and stays down. */
+    end = compat_time_ms() + IDLE_DISCONNECT_MS + DATA_TIMEOUT;
+    do {
+        compat_sleep_ms(10, NULL);
+        status = plc_tag_get_int_attribute(rw_id, "connection_status", -1);
+    } while(status != PLCTAG_CONN_STATUS_IDLE_WAIT && compat_time_ms() < end);
+
+    if(status != PLCTAG_CONN_STATUS_IDLE_WAIT) {
+        printf("FAIL: the connection never went idle; status %" PRId32 ".\n", status);
+        failures++;
+    }
+
+    end = compat_time_ms() + IDLE_HOLD_MS;
+    while(!failures && compat_time_ms() < end) {
+        compat_sleep_ms(10, NULL);
+        status = plc_tag_get_int_attribute(rw_id, "connection_status", -1);
+        if(status != PLCTAG_CONN_STATUS_IDLE_WAIT) {
+            printf("FAIL: the idle connection came back with nothing to do; status %" PRId32 ".\n", status);
+            failures++;
+        }
+    }
+
+    /* the tag whose write failed still works. */
+    rc = plc_tag_read(ro_id, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("FAIL: the input register read returned %s.\n", plc_tag_decode_error(rc));
+        failures++;
+    }
+
+    plc_tag_destroy(ro_id);
+    plc_tag_destroy(rw_id);
+
+    return failures;
+}
+
+
+static int32_t run_split_pipelined(const char *base, int32_t count) {
+    char extra[ATTR_LEN];
+    int32_t failures = 0;
+    int32_t split_id = 0;
+
+    compat_snprintf(extra, sizeof(extra), "elem_count=%d&name=hr0", SPLIT_ELEMS);
+    split_id = create_tag(base, extra);
+    if(split_id < 0) { return 1; }
+
+    for(int32_t i = 0; i < count; i++) {
+        ids[i] = create_reg(base, SPLIT_SMALL_BASE + i, "", NULL);
+        if(ids[i] < 0) { return 1; }
+
+        plc_tag_set_int16(ids[i], 0, value_of(i, 1));
+        if(plc_tag_write(ids[i], DATA_TIMEOUT) != PLCTAG_STATUS_OK) {
+            printf("FAIL: unable to write register %" PRId32 ".\n", SPLIT_SMALL_BASE + i);
+            return 1;
+        }
+    }
+
+    for(int32_t round = 0; round < SPLIT_ROUNDS && !failures; round++) {
+        int64_t end = compat_time_ms() + DATA_TIMEOUT;
+
+        /* the split read goes first; with more reads than slots, every slot is full when its partial reply comes in. */
+        plc_tag_read(split_id, 0);
+        for(int32_t i = 0; i < count; i++) { plc_tag_read(ids[i], 0); }
+
+        /*
+         * Poll the split tag without a pause.  Its api_mutex is then often held when the handler
+         * would send its second request, so the next reply comes in while it waits.
+         */
+        while(plc_tag_status(split_id) == PLCTAG_STATUS_PENDING && compat_time_ms() < end) {}
+
+        if(wait_not_pending(&split_id, 1, DATA_TIMEOUT) != PLCTAG_STATUS_OK) { failures++; }
+        if(wait_not_pending(ids, count, DATA_TIMEOUT) != PLCTAG_STATUS_OK) { failures++; }
+
+        if(plc_tag_status(split_id) != PLCTAG_STATUS_OK) {
+            printf("FAIL: the split read ended with %s.\n", plc_tag_decode_error(plc_tag_status(split_id)));
+            failures++;
+        }
+
+        for(int32_t i = 0; i < count; i++) { failures += check_reg(ids[i], SPLIT_SMALL_BASE + i, value_of(i, 1)); }
+    }
+
+    plc_tag_destroy(split_id);
+    for(int32_t i = 0; i < count; i++) { plc_tag_destroy(ids[i]); }
+
+    return failures;
+}
+
+
+static int32_t run_expire_busy(const char *base, int32_t count) {
+    int32_t failures = 0;
+    int32_t busy_id = 0;
+    int32_t alive = 0;
+    int64_t armed_start = 0;
+    int64_t armed_end = 0;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    for(int32_t i = 0; i < count; i++) {
+        ids[i] = create_reg(base, i, "", NULL);
+        if(ids[i] < 0) { return 1; }
+    }
+
+    busy_id = create_reg(base, BUSY_REGISTER, "", NULL);
+    if(busy_id < 0) { return 1; }
+
+    /* arm every tag at once, so they all fall due together. */
+    armed_start = compat_time_ms();
+    for(int32_t i = 0; i < count; i++) {
+        rc = plc_tag_set_int_attribute(ids[i], "destroy_tag_after_idle_sec", EXPIRE_SEC);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("FAIL: unable to set destroy_tag_after_idle_sec on register %" PRId32 ", %s.\n", i,
+                   plc_tag_decode_error(rc));
+            return 1;
+        }
+    }
+    armed_end = compat_time_ms();
+
+    while(compat_time_ms() < armed_start + (EXPIRE_SEC * 1000) - 200) { compat_sleep_ms(10, NULL); }
+
+    /* none goes early. */
+    for(int32_t i = 0; i < count; i++) {
+        if(plc_tag_status(ids[i]) == PLCTAG_ERR_NOT_FOUND) {
+            printf("FAIL: register %" PRId32 " was destroyed before its idle limit.\n", i);
+            failures++;
+        }
+    }
+
+    /* the slow server holds this read, and the only request slot, past the idle limit. */
+    plc_tag_read(busy_id, 0);
+
+    /* all are gone within the slack, before the read's reply frees the slot. */
+    while(compat_time_ms() < armed_end + (EXPIRE_SEC * 1000) + EXPIRE_SLACK_MS) { compat_sleep_ms(10, NULL); }
+    for(int32_t i = 0; i < count; i++) {
+        if(plc_tag_status(ids[i]) != PLCTAG_ERR_NOT_FOUND) {
+            alive++;
+            plc_tag_destroy(ids[i]);
+        }
+    }
+
+    if(alive) {
+        printf("FAIL: %" PRId32 " of %" PRId32 " tags were still alive %dms after their idle limit.\n", alive, count,
+               EXPIRE_SLACK_MS);
+        failures++;
+    }
+
+    if(wait_not_pending(&busy_id, 1, DATA_TIMEOUT) != PLCTAG_STATUS_OK || plc_tag_status(busy_id) != PLCTAG_STATUS_OK) {
+        printf("FAIL: the read holding the slot did not finish.\n");
+        failures++;
+    }
+
+    plc_tag_destroy(busy_id);
+
+    return failures;
+}
+
+
+static int32_t create_tag(const char *base, const char *name_and_count) {
+    char attrs[ATTR_LEN];
+    int32_t id = 0;
+
+    compat_snprintf(attrs, sizeof(attrs), "%s&%s", base, name_and_count);
+
+    id = plc_tag_create(attrs, DATA_TIMEOUT);
+    if(id < 0) { printf("FAIL: unable to create %s, %s.\n", name_and_count, plc_tag_decode_error(id)); }
+
+    return id;
 }
 
 

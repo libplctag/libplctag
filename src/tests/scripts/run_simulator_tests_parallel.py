@@ -1542,7 +1542,7 @@ def build_manifest() -> Manifest:
     # A bit in an L file reads like any other, but cannot be written: PCCC has no
     # read-modify-write for 32-bit words.
     sec.test("L bit data file Micrologix tag read",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--check=0", "--debug=4"],
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--debug=4"],
               F)
     sec.test("L bit data file Micrologix tag write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--write=1", "--debug=4"],
@@ -1875,6 +1875,25 @@ def build_manifest() -> Manifest:
     sec.test("abort storm with replies out of order (Modbus)",
               [exe("test_modbus_ops"), "--mode=abort-storm", "--count=10", mb_inflight8], F,
               server=mb_fault_server("--reorder=true"))
+    # An abort must not free the request's slot: its reply still comes back, so the next request
+    # would put two on the wire with one allowed (known issue 16).  The server counts.
+    limited = sec.test("abort storm keeps to one request in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=abort-storm", "--count=4", mb_ops_base], F,
+              server=mb_fault_server("--delay-ms=10", "--max-in-flight=1"))
+    sec.test("check: the abort storm's server counted requests in flight", None, F, depends_on=limited.id,
+              ports_needed=0, check=CheckSpec(log_file=limited.server_log_file,
+                                              pattern=r"Requests in flight: new high of 1\.", expected=1))
+    sec.test("check: the abort storm never had more than one request in flight", None, F, depends_on=limited.id,
+              ports_needed=0, check=CheckSpec(log_file=limited.server_log_file, pattern=r"Over the limit", expected=0))
+    # Known issues 7, 8 and 14, each against old code in test_modbus_ops.c's mode notes.
+    sec.test("failed write build leaves nothing queued, so the idle connection stays down (Modbus)",
+              [exe("test_modbus_ops"), "--mode=write-readonly", mb_ops_base], T, server=mb_fault_server())
+    sec.test("split read's partial reply with every request slot full (Modbus)",
+              [exe("test_modbus_ops"), "--mode=split-pipelined", "--count=30", mb_inflight8], F,
+              server=mb_fault_server("--holding-registers=200"))
+    sec.test("auto-destroy expires on time while a slow read holds the only request slot (Modbus)",
+              [exe("test_modbus_ops"), "--mode=expire-busy", "--count=3", mb_ops_base], T,
+              server=mb_fault_server("--delay-ms=2000"))
     dropped = sec.test("write and read back while the server drops every 7th request's connection (Modbus)",
               [exe("test_modbus_ops"), "--mode=write-read", mb_ops_base + mb_redial], F,
               server=mb_fault_server("--close-every=7"))
@@ -1962,18 +1981,21 @@ _default_port_sema = None
 _client_wrapper: list[str] = []
 # Multiplies the per-test kill budgets (see --timeout-scale).
 _timeout_scale = 1.0
+# Seed passed to every ab_server and modbus_server (see --random-fill); 0 is off.
+_random_fill = 0
 
 
 def _worker_init(port_counter, port_lock, stress_sema, default_port_sema,
-                 client_wrapper, timeout_scale) -> None:
+                 client_wrapper, timeout_scale, random_fill) -> None:
     global _port_counter, _port_lock, _stress_sema, _default_port_sema
-    global _client_wrapper, _timeout_scale
+    global _client_wrapper, _timeout_scale, _random_fill
     _port_counter = port_counter
     _port_lock = port_lock
     _stress_sema = stress_sema
     _default_port_sema = default_port_sema
     _client_wrapper = client_wrapper
     _timeout_scale = timeout_scale
+    _random_fill = random_fill
     raise_fd_limit(1024)
 
 
@@ -2069,6 +2091,8 @@ def run_test_in_worker(test: Test) -> Result:
         for attempt in range(2):
             if test.server is not None:
                 server_cmd = [test.server.exe_path] + _fill(test.server.args_template, ports)
+                if _random_fill and Path(test.server.exe_path).stem in ("ab_server", "modbus_server"):
+                    server_cmd.append(f"--random-fill={_random_fill}")
                 server_proc = spawn(server_cmd, Path(test.server_log_file))
                 ready_port = ports[0] if ports else DEFAULT_LIB_PORT
                 # Generous upper bound (not just startup_wait_s) so a slow/contended CI
@@ -2092,8 +2116,10 @@ def run_test_in_worker(test: Test) -> Result:
             base_timeout = STRESS_TEST_TIMEOUT_S if test.group == Group.STRESS else DEFAULT_TEST_TIMEOUT_S
             timeout_s = base_timeout * _timeout_scale
             try:
+                # in its log directory: a test that starts its own server leaves the logs there.
                 with open(test.log_file, "w") as log:
-                    proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=timeout_s)
+                    proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=timeout_s,
+                                          cwd=Path(test.log_file).parent)
                 ok = (proc.returncode == 0) != test.expect_failure
                 detail = ""
             except subprocess.TimeoutExpired:
@@ -2188,6 +2214,10 @@ def main() -> int:
     parser.add_argument("--timeout-scale", type=float, default=1.0,
                          help="multiplier for the per-test kill budgets; raise it when --client-wrapper "
                               "slows the client down (Valgrind costs roughly 20-50x)")
+    parser.add_argument("--random-fill", type=int, default=0,
+                         help="start every ab_server and modbus_server with its tags and registers filled "
+                              "from this seed instead of zeros, to find tests that expect zeros.  Tests that "
+                              "start their own server are not covered.")
     parser.add_argument("--skip-groups", default="",
                          help="comma-separated groups to skip entirely (functional, stress, timing). "
                               "TIMING tests assert on wall-clock behaviour and STRESS tests spawn hundreds "
@@ -2202,7 +2232,8 @@ def main() -> int:
         print(f"--skip-groups: {e}")
         return 1
 
-    TEST_DIR = Path(args.test_dir)
+    # absolute, because each test client runs in its log directory.
+    TEST_DIR = Path(args.test_dir).resolve()
     LOG_DIR = Path(args.log_dir)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2264,7 +2295,7 @@ def main() -> int:
         print(f"Starting phase '{names}': {len(phase_tests)} tests, {workers} workers...")
         with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_worker_init,
                                   initargs=(port_counter, port_lock, stress_sema, default_port_sema,
-                                            client_wrapper, args.timeout_scale)) as pool:
+                                            client_wrapper, args.timeout_scale, args.random_fill)) as pool:
             results, elapsed = run_phase(pool, phase_tests)
         all_results.extend(results)
         # Record the name alongside the time: with --skip-groups, phases can be
