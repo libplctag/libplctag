@@ -749,12 +749,7 @@ jobs:
             runner: windows-2025
             cmake_processor: AMD64
             artifact_suffix: "windows_x64_MinGW"
-          - name: x86_MinGW
-            toolchain: mingw
-            runner: windows-2025
-            cmake_processor: x86
-            cmake_toolchain_file: cmake_toolchains/mingw_i686_windows.cmake
-            artifact_suffix: "windows_x86_MinGW"
+          # x86_MinGW dropped: MSYS2 is removing its 32-bit MINGW32 packages (mingw-w64-i686-make is gone).
 
     env:
       ARTIFACT: ""
