@@ -852,7 +852,7 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
      */
     critical_block(&tag->api_mutex) {
         tag->read_cache_expire = (uint64_t)0;
-        tag->abort_count++;
+        tag->abort_count = (uint8_t)(tag->abort_count + 1); /* wraps; only a change matters. */
 
         /* an abort before the create ended fails the create for good. */
         if(!tag->create_done) {
