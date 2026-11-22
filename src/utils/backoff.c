@@ -46,6 +46,10 @@ void backoff_init(backoff_t *backoff, int64_t initial_ms, int64_t max_ms) {
     backoff->max_ms = max_ms;
     backoff->base_ms = initial_ms;
     backoff->attempts = 0;
+    backoff->up = false;
+    backoff->up_since_ms = 0;
+    backoff->window_start_ms = 0;
+    backoff->window_drops = 0;
 }
 
 
@@ -55,7 +59,12 @@ void backoff_reset(backoff_t *backoff) {
 }
 
 
-void backoff_saturate(backoff_t *backoff) { backoff->base_ms = backoff->max_ms; }
+void backoff_saturate(backoff_t *backoff) {
+    backoff->base_ms = backoff->max_ms;
+
+    /* whatever came up was refused: the next wait must not take it for a working connection and restart. */
+    backoff->up = false;
+}
 
 
 void backoff_set_max_ms(backoff_t *backoff, int64_t max_ms) {
@@ -94,4 +103,40 @@ int64_t backoff_wait_ms(backoff_t *backoff) {
     backoff->attempts++;
 
     return result;
+}
+
+
+extern void backoff_connected(backoff_t *backoff, int64_t now_ms) {
+    if(backoff->up) { return; }
+
+    backoff->up = true;
+    backoff->up_since_ms = now_ms;
+}
+
+
+extern int64_t backoff_retry_wait_ms(backoff_t *backoff, int64_t now_ms) {
+    int64_t wait_ms = 0;
+
+    if(!backoff->up) { return backoff_wait_ms(backoff); }
+
+    backoff->up = false;
+
+    /* a connection that lasted a whole window was working: start over. */
+    if(now_ms - backoff->up_since_ms >= BACKOFF_RECONNECT_WINDOW_MS) { backoff_reset(backoff); }
+
+    if(now_ms - backoff->window_start_ms >= BACKOFF_RECONNECT_WINDOW_MS) {
+        backoff->window_start_ms = now_ms;
+        backoff->window_drops = 0;
+    }
+
+    backoff->window_drops++;
+
+    /* once it has grown, it keeps growing until a connection lasts: a storm is not forgiven each new window. */
+    if(backoff->window_drops <= BACKOFF_MAX_RECONNECTS_PER_WINDOW && backoff->base_ms == backoff->initial_ms) {
+        return backoff->initial_ms;
+    }
+
+    wait_ms = backoff_wait_ms(backoff);
+
+    return (wait_ms < backoff->initial_ms) ? backoff->initial_ms : wait_ms;
 }

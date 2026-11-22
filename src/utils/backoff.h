@@ -34,21 +34,30 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
  * Exponential backoff with jitter, shared by every protocol module's connection
  * retry loop.
  *
- * The caller owns the state.  Initialize it once, call backoff_wait_ms() each time a
- * connection attempt fails, and call backoff_reset() once an attempt succeeds.
+ * The caller owns the state.  Initialize it once, call backoff_connected() when a connection
+ * comes up and backoff_retry_wait_ms() each time a connect fails or a connection drops.
  */
+
+/* more drops than this in one window is a reconnect storm: the backoff grows instead of the minimum wait. */
+#define BACKOFF_RECONNECT_WINDOW_MS (1000)
+#define BACKOFF_MAX_RECONNECTS_PER_WINDOW (5)
 
 typedef struct {
     int64_t initial_ms; /* the first delay, and what a reset returns to */
     int64_t max_ms;     /* the delay never grows past this */
     int64_t base_ms;    /* the current, un-jittered delay */
     uint32_t attempts;  /* consecutive failures; for logging only, never feeds the delay */
+    bool up;                 /* a connection came up and has not dropped yet */
+    int64_t up_since_ms;     /* when it came up */
+    int64_t window_start_ms; /* the window drops are counted in */
+    uint32_t window_drops;   /* drops in that window */
 } backoff_t;
 
 /**
@@ -104,3 +113,24 @@ extern void backoff_set_max_ms(backoff_t *backoff, int64_t max_ms);
  * @return int64_t Milliseconds to wait.
  */
 extern int64_t backoff_wait_ms(backoff_t *backoff);
+
+/**
+ * @brief Note that a connection is up.  Only the first call after a drop counts, so a caller
+ * may call it each time it finds the connection working.
+ * @param backoff The state to update.
+ * @param now_ms The current time.
+ */
+extern void backoff_connected(backoff_t *backoff, int64_t now_ms);
+
+/**
+ * @brief How long to wait before connecting again, after a failed connect or a dropped connection.
+ * A connect that never came up grows the backoff, as backoff_wait_ms() does.  A connection that
+ * came up waits initial_ms, unless more than BACKOFF_MAX_RECONNECTS_PER_WINDOW drops fell in the
+ * current window: then the backoff grows, never below initial_ms, and keeps growing on every drop
+ * after that.  Only a connection that stayed up a whole window restarts the backoff, so a device
+ * that accepts and then drops at once backs off to the maximum and stays there.
+ * @param backoff The state to advance.
+ * @param now_ms The current time.
+ * @return int64_t Milliseconds to wait.
+ */
+extern int64_t backoff_retry_wait_ms(backoff_t *backoff, int64_t now_ms);
