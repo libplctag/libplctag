@@ -55,6 +55,7 @@ static void test_forward_close_header(void **state) {
 
     session = (cip_conn_p)calloc(1, sizeof(*session));
     assert_non_null(session);
+    mutex_init(&session->session_mutex);
 
     /* a stale buffer: every header field the encoder leaves alone shows up as 0xAA. */
     memset(session->data, 0xAA, sizeof(session->data));
@@ -72,6 +73,7 @@ static void test_forward_close_header(void **state) {
     assert_true(le2h32(fc->interface_handle) == 0);
     assert_int_equal(fc->reserved, 0);
 
+    mutex_destroy(&session->session_mutex);
     free(session);
 }
 

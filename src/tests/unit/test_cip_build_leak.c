@@ -102,6 +102,7 @@ static ab_tag_p make_tag(void) {
     ab_tag_p tag = (ab_tag_p)calloc(1, sizeof(struct ab_tag_t));
 
     assert_non_null(tag);
+    mutex_init(&tag->api_mutex);
 
     tag->tag_id = 1;
     tag->plc_type = AB_PLC_LGX;
@@ -141,6 +142,7 @@ static void check_freed(const char *what, int (*build)(ab_tag_p tag), void (*set
 
     available_payload = REQUEST_CAPACITY;
     add_request_rc = PLCTAG_STATUS_OK;
+    mutex_destroy(&tag->api_mutex);
     free(tag);
 }
 
