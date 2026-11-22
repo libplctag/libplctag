@@ -199,7 +199,7 @@ def build_manifest() -> list[Test]:
     logix_gw = LOGIX_GW
     logix_path = "1,4"
     mlgx_gw = MLGX_GW
-    # the MicroLogix holds B3:0/0 on, so the test uses one of the other bits.
+    # the MicroLogix drives B3:0/0 itself, so the tests flip one of the other bits and ignore bit 0.
     mlgx_b3_bit = random.randrange(1, 16)
     plc5_gw = PLC5_GW
     dhp_bridge_gw = LOGIX_GW
@@ -279,11 +279,11 @@ def build_manifest() -> list[Test]:
               f"--bit-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestLINTArray[0].43"]),
         test("test non-standard UDT strings", [exe("string_non_standard_udt")]),
         test("test non-standard string size", [exe("test_string")]),
-        # Stamp the word with only bit 0 on, as the PLC holds it, then set and clear one random
-        # bit from 1 to 15, reading each step back as a bit and as a word.  The bit is in the
+        # Stamp the default alternating pattern, then set and clear one random bit from 1 to 15,
+        # reading each step back as a bit and as a word, bit 0 ignored.  The bit is in the
         # log's command line.
         test("B data file Micrologix tag read/write",
-             [exe("test_bit_write"), f"--bit={mlgx_b3_bit}", "--pattern=1", "--debug=4",
+             [exe("test_bit_write"), f"--bit={mlgx_b3_bit}", "--ignore-mask=0x1", "--debug=4",
               f"--word-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=B3:0",
               f"--bit-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0/{mlgx_b3_bit}"]),
         test("B bit data file Micrologix tag read/write",
@@ -306,7 +306,7 @@ def build_manifest() -> list[Test]:
         # The SLC masked write carries a mask word then a data word; a wrong width shows up
         # here and nowhere else.
         test("Micrologix B bit write changes only that bit (SLC masked write)",
-             [exe("test_bit_write"), "--bit=6", "--pattern=0x5a5b", "--debug=4",
+             [exe("test_bit_write"), "--bit=6", "--ignore-mask=0x1", "--debug=4",
               f"--word-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=B3:0",
               f"--bit-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0/6"]),
         test("Micrologix N bit write changes only that bit (SLC masked write)",

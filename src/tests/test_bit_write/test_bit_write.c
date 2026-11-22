@@ -84,6 +84,7 @@ int main(int argc, char **argv) {
     uint64_t original = 0;
     uint64_t actual = 0;
     uint64_t mask = 0;
+    uint64_t keep = ~(uint64_t)0;
     int word_size = 0;
     bool refresh = true;
     int32_t word_tag = PLCTAG_ERR_CREATE;
@@ -100,6 +101,8 @@ int main(int argc, char **argv) {
             bit = atoi(&(argv[i][6]));
         } else if(strncmp(argv[i], "--pattern=", 10) == 0) {
             pattern = strtoull(&(argv[i][10]), NULL, 0);
+        } else if(strncmp(argv[i], "--ignore-mask=", 14) == 0) {
+            keep = ~strtoull(&(argv[i][14]), NULL, 0);
         } else if(strncmp(argv[i], "--timeout=", 10) == 0) {
             timeout = atoi(&(argv[i][10]));
         } else if(strncmp(argv[i], "--debug=", 8) == 0) {
@@ -181,7 +184,7 @@ int main(int argc, char **argv) {
         rc = read_word(word_tag, word_size, timeout, &actual);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        if(actual != pattern) {
+        if((actual & keep) != (pattern & keep)) {
             printf("ERROR: wrote pattern 0x%" PRIx64 " to the word but read back 0x%" PRIx64 "!\n", pattern, actual);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -199,7 +202,7 @@ int main(int argc, char **argv) {
         rc = read_word(word_tag, word_size, timeout, &actual);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        rc = check_word(pattern | mask, actual, bit, 1);
+        rc = check_word((pattern | mask) & keep, actual & keep, bit, 1);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         /* clear the bit: an AND mask that is too wide fails here and not above. */
@@ -212,7 +215,7 @@ int main(int argc, char **argv) {
         rc = read_word(word_tag, word_size, timeout, &actual);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        rc = check_word(pattern & ~mask, actual, bit, 0);
+        rc = check_word(pattern & ~mask & keep, actual & keep, bit, 0);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         printf("PASS: setting and clearing bit %d changed only bit %d.\n", bit, bit);
@@ -242,7 +245,7 @@ int main(int argc, char **argv) {
 void usage(void) {
     printf("Usage:\n"
            "test_bit_write --word-tag=<tag string> --bit-tag=<tag string> --bit=<n>\n"
-           "               [--pattern=<value>] [--timeout=<ms>] [--debug=<n>]\n"
+           "               [--pattern=<value>] [--ignore-mask=<value>] [--timeout=<ms>] [--debug=<n>]\n"
            "\n"
            "  --word-tag  A tag string addressing the whole word that contains the bit.  It must\n"
            "              hold exactly one element of 1, 2, 4 or 8 bytes.\n"
@@ -251,6 +254,7 @@ void usage(void) {
            "              tag strings spell this differently per protocol, so it is given here.\n"
            "  --pattern   The value stamped on the word before each bit write.  Default is an\n"
            "              alternating 0x5A5A... truncated to the word size.\n"
+           "  --ignore-mask  Bits the device drives itself, left out of every word check.\n"
            "  --stale     Do not read the bit tag before writing it, so its buffer is whatever it\n"
            "              held at create time.  The word must survive that too, which only a\n"
            "              device that applies the mask can promise.\n"
