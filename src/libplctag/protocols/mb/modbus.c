@@ -41,16 +41,19 @@
 #include <stdlib.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
+#include <utils/backoff.h>
 #include <utils/debug.h>
-#include <utils/random_utils.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
 #include <utils/time_utils.h>
 
 /* data definitions */
 
-#define PLC_SOCKET_ERR_MAX_DELAY (5000)
-#define PLC_SOCKET_ERR_START_DELAY (50)
+/* reconnect waits, as on CIP: at least 100ms, and up to connection_retry_max_delay_ms (default 10s). */
+#define RETRY_WAIT_INITIAL_MS (100)
+#define RETRY_WAIT_MAX_MS (10000)
+#define CONN_RETRY_MAX_DELAY_MIN_MS (100)
+#define CONN_RETRY_MAX_DELAY_LIMIT_MS (300000)
 #define PLC_SOCKET_ERR_DELAY_WAIT_INCREMENT (10)
 #define MODBUS_DEFAULT_PORT (502)
 /* a DNS name is at most 253 characters. */
@@ -156,6 +159,7 @@ struct modbus_plc_t {
 
     /* comms timeout/disconnect - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
+    atomic_int32_t connection_retry_max_delay_ms;    /* the longest reconnect wait, milliseconds */
 
     /* data */
     int read_data_len;
@@ -616,6 +620,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int max_requests_in_flight = attr_get_int(attribs, "max_requests_in_flight", 1);
     int connection_inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT;
+    int connection_retry_max_delay_ms = attr_get_int(attribs, "connection_retry_max_delay_ms", RETRY_WAIT_MAX_MS);
     int is_new = 0;
     int rc = PLCTAG_STATUS_OK;
 
@@ -644,6 +649,13 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
     } else {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
                connection_inactivity_timeout_ms);
+    }
+
+    if(connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS || connection_retry_max_delay_ms > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "connection_retry_max_delay_ms %d must be between %d and %d, clamping.",
+               connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS);
+        connection_retry_max_delay_ms = (connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS) ? CONN_RETRY_MAX_DELAY_MIN_MS
+                                                                                                    : CONN_RETRY_MAX_DELAY_LIMIT_MS;
     }
 
     if(server_id < 0 || server_id > 255) {
@@ -738,6 +750,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
                     /* Initialize PLC state before making it visible to other threads */
                     (*plc)->state = PLC_CONNECT_START;
                     atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
+                    atomic_init_int32(&(*plc)->connection_retry_max_delay_ms, connection_retry_max_delay_ms);
                     atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
                     /* conn_event_ring_write_idx always points at the ring slot holding the
@@ -1007,18 +1020,33 @@ static int reset_plc(modbus_plc_p plc) {
 }
 
 
-#define UPDATE_ERR_DELAY()                                                                 \
-    do {                                                                                   \
-        err_delay = err_delay * 2;                                                         \
-        if(err_delay > PLC_SOCKET_ERR_MAX_DELAY) { err_delay = PLC_SOCKET_ERR_MAX_DELAY; } \
-        err_delay_until = (int64_t)random_u64((uint64_t)err_delay) + time_ms();            \
-    } while(0)
+/*
+ * A failed connect or a lost connection: close it and wait in PLC_ERR_WAIT before connecting again.
+ * The backoff makes a connection that keeps dropping wait longer and longer, so a device that
+ * accepts and then closes at once does not get reconnected to hundreds of times a second.
+ */
+static void retry_later(modbus_plc_p plc, backoff_t *retry_backoff, int64_t *err_delay_until) {
+    int64_t retry_wait_ms = 0;
+
+    reset_plc(plc);
+    mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DOWN);
+
+    /* the cap is read on every retry, as on CIP. */
+    backoff_set_max_ms(retry_backoff, atomic_get_int32(&plc->connection_retry_max_delay_ms));
+    retry_wait_ms = backoff_retry_wait_ms(retry_backoff, time_ms());
+    *err_delay_until = time_ms() + retry_wait_ms;
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.",
+           retry_backoff->attempts, retry_wait_ms);
+
+    plc->state = PLC_ERR_WAIT;
+}
 
 
 THREAD_FUNC(modbus_plc_handler) {
     int rc = PLCTAG_STATUS_OK;
     modbus_plc_p plc = (modbus_plc_p)arg;
-    int64_t err_delay = PLC_SOCKET_ERR_START_DELAY;
+    backoff_t retry_backoff;
     int64_t err_delay_until = 0;
     int sock_events = SOCK_EVENT_NONE;
     int waitable_events = SOCK_EVENT_NONE;
@@ -1031,6 +1059,7 @@ THREAD_FUNC(modbus_plc_handler) {
         THREAD_RETURN(0);
     }
 
+    backoff_init(&retry_backoff, RETRY_WAIT_INITIAL_MS, atomic_get_int32(&plc->connection_retry_max_delay_ms));
 
     while(!atomic_get_bool(&plc->flags.terminate) && atomic_get_bool(&lib_active)) {
         int64_t wait_time_ms = MODBUS_IDLE_WAIT_TIMEOUT;
@@ -1086,8 +1115,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Successfully connected to the PLC.  Going to PLC_READY state.");
 
-                    /* reset err_delay */
-                    err_delay = PLC_SOCKET_ERR_START_DELAY;
+                    backoff_connected(&retry_backoff, time_ms());
 
                     /* Update timestamp for inactivity tracking now that we're connected */
                     plc->last_packet_time_ms = time_ms();
@@ -1104,16 +1132,8 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s received while starting socket connection.",
                            plc_tag_decode_error(rc));
 
-                    /* exponential increase with jitter. */
-                    UPDATE_ERR_DELAY();
-
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
-                           "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
-                           err_delay);
-
                     /* the connect failed, so the connection is down before the retry wait starts. */
-                    mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DOWN);
-                    plc->state = PLC_ERR_WAIT;
+                    retry_later(plc, &retry_backoff, &err_delay_until);
                 }
                 break;
 
@@ -1134,8 +1154,7 @@ THREAD_FUNC(modbus_plc_handler) {
                            " (connection established in PLC_CONNECT_WAIT).",
                            plc->last_packet_time_ms, plc->disconnect_at_time_ms);
 
-                    /* reset err_delay */
-                    err_delay = PLC_SOCKET_ERR_START_DELAY;
+                    backoff_connected(&retry_backoff, time_ms());
 
                     plc->state = PLC_READY;
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
@@ -1146,16 +1165,8 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s received while waiting for socket connection.",
                            plc_tag_decode_error(rc));
 
-                    /* exponential increase with jitter. */
-                    UPDATE_ERR_DELAY();
-
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
-                           "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
-                           err_delay);
-
                     /* the connect failed, so the connection is down before the retry wait starts. */
-                    mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DOWN);
-                    plc->state = PLC_ERR_WAIT;
+                    retry_later(plc, &retry_backoff, &err_delay_until);
                 }
                 break;
 
@@ -1220,6 +1231,13 @@ THREAD_FUNC(modbus_plc_handler) {
                     }
                 }
 
+                /* a closed connection can still hold answers: read them first.  The read hits EOF once they are gone. */
+                if((sock_events & SOCK_EVENT_DISCONNECT) && (sock_events & SOCK_EVENT_CAN_READ) && !(sock_events & SOCK_EVENT_ERROR)) {
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Peer closed the connection; reading the responses it sent first.");
+                    plc->state = PLC_RECEIVE_RESPONSE;
+                    break;
+                }
+
                 /* check for socket errors or disconnects. */
                 if((sock_events & SOCK_EVENT_ERROR) || (sock_events & SOCK_EVENT_DISCONNECT)) {
                     if(sock_events & SOCK_EVENT_DISCONNECT) {
@@ -1228,10 +1246,7 @@ THREAD_FUNC(modbus_plc_handler) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unexpected socket error!");
                     }
 
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Going to state PLC_CONNECT_START");
-
-                    /* try to reconnect immediately */
-                    plc->state = PLC_CONNECT_START;
+                    retry_later(plc, &retry_backoff, &err_delay_until);
                     break;
                 }
 
@@ -1287,9 +1302,7 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Not all data written, will try again.");
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Resetting PLC due to write error %s.", plc_tag_decode_error(rc));
-
-                    /* try to reconnect immediately. */
-                    plc->state = PLC_CONNECT_START;
+                    retry_later(plc, &retry_backoff, &err_delay_until);
                 }
 
                 /* if we did not send all the packet, we stay in this state and keep trying. */
@@ -1313,9 +1326,7 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Response not complete, continue reading data.");
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Reconnecting due to read error %s.", plc_tag_decode_error(rc));
-
-                    /* try to reconnect immediately. */
-                    plc->state = PLC_CONNECT_START;
+                    retry_later(plc, &retry_backoff, &err_delay_until);
                 }
 
                 /* in all cases we want to cycle through the state machine immediately. */
@@ -4199,6 +4210,45 @@ int mb_init(void) {
 
     return rc;
 }
+
+/*
+ * Stop and join every handler thread before the refcount module stops its cleanup thread.  A
+ * handler that drops the last tag reference after that would run the PLC destructor on itself.
+ * A PLC already at zero references is skipped; its queued destructor joins the thread.
+ */
+extern void mb_teardown(void) {
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
+
+    /* mb_init() never ran: no PLCs. */
+    if(!mb_mutex.initialized) { return; }
+
+    for(;;) {
+        modbus_plc_p plc = NULL;
+
+        critical_block(&mb_mutex) {
+            for(modbus_plc_p walker = plcs; walker && !plc; walker = walker->next) {
+                if(walker->handler_thread) { plc = rc_inc(walker); }
+            }
+        }
+
+        if(!plc) { break; }
+
+        atomic_set_bool(&plc->flags.terminate, true);
+
+        critical_block(&plc->mutex) {
+            if(plc->sock) { socket_wake(plc->sock); }
+        }
+
+        thread_join(plc->handler_thread);
+        thread_destroy(&plc->handler_thread);
+        plc->handler_thread = NULL;
+
+        rc_dec(plc);
+    }
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Done.");
+}
+
 
 /* op is read without a lock by mb_tag_status() and the handler's scans, so every access is atomic. */
 static tag_op_type_t tag_op_get(modbus_tag_p tag) { return (tag_op_type_t)atomic_get_int32(&tag->op); }
