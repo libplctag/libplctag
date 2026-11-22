@@ -6,7 +6,7 @@
 #   parse_libplctag_header(INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
 #
 # This creates:
-#   - add_custom_command that regenerates outputs when INPUT_HEADER changes
+#   - add_custom_command that regenerates outputs when INPUT_HEADER or this script changes
 #   - Sets OUTPUT_HEADER and OUTPUT_NAMES_C in parent scope for use in target sources
 #   - Creates 'generate_debug_headers' target for targets that only need the header
 #
@@ -26,7 +26,7 @@ function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
             -DOUTPUT_HEADER=${OUTPUT_HEADER}
             -DOUTPUT_NAMES_C=${OUTPUT_NAMES_C}
             -P ${_PARSE_LIBPLCTAG_SCRIPT}
-        DEPENDS "${INPUT_HEADER}"
+        DEPENDS "${INPUT_HEADER}" "${_PARSE_LIBPLCTAG_SCRIPT}"
         COMMENT "Generating debug headers from libplctag.h"
         VERBATIM
     )
@@ -63,12 +63,14 @@ function(parse_libplctag_header_impl INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
         set(ERROR_CODE_ENTRIES "${ERROR_CODE_ENTRIES}    ${MATCH_STRIPPED},\n")
     endforeach()
 
-    # Parse debug levels
+    # Parse debug levels.  libplctag.h is their only definition: the short names are aliases.
     set(DEBUG_LEVEL_ENTRIES "")
+    set(LAST_DEBUG_LEVEL "")
     string(REGEX MATCHALL "PLCTAG_DEBUG_[A-Z_]+ = [0-9]+" DEBUG_MATCHES "${DEBUG_ENUM}")
     foreach(MATCH ${DEBUG_MATCHES})
-        string(REGEX REPLACE "PLCTAG_DEBUG_" "DEBUG_" MATCH_CONVERTED "${MATCH}")
-        set(DEBUG_LEVEL_ENTRIES "${DEBUG_LEVEL_ENTRIES}    ${MATCH_CONVERTED},\n")
+        string(REGEX MATCH "PLCTAG_DEBUG_([A-Z_]+)" LEVEL_MATCH "${MATCH}")
+        set(DEBUG_LEVEL_ENTRIES "${DEBUG_LEVEL_ENTRIES}#define DEBUG_${CMAKE_MATCH_1} PLCTAG_DEBUG_${CMAKE_MATCH_1}\n")
+        set(LAST_DEBUG_LEVEL "PLCTAG_DEBUG_${CMAKE_MATCH_1}")
     endforeach()
 
     # Parse debug modules from header and create internal representation
@@ -99,14 +101,14 @@ function(parse_libplctag_header_impl INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
     set(GENERATED_HEADER "${GENERATED_HEADER} * AUTO-GENERATED FILE - DO NOT EDIT\n")
     set(GENERATED_HEADER "${GENERATED_HEADER} */\n\n")
     set(GENERATED_HEADER "${GENERATED_HEADER}#pragma once\n\n")
-    set(GENERATED_HEADER "${GENERATED_HEADER}#include <stdint.h>\n\n")
-    
+    set(GENERATED_HEADER "${GENERATED_HEADER}#include <stdint.h>\n")
+    set(GENERATED_HEADER "${GENERATED_HEADER}#include <libplctag/lib/libplctag.h>\n\n")
+
     # Debug levels
-    set(GENERATED_HEADER "${GENERATED_HEADER}/* Debug levels - generated from plctag_debug_level_t enum */\n")
-    set(GENERATED_HEADER "${GENERATED_HEADER}typedef enum {\n")
+    set(GENERATED_HEADER "${GENERATED_HEADER}/* Debug levels - aliases of plctag_debug_level_t in libplctag.h, their only definition */\n")
+    set(GENERATED_HEADER "${GENERATED_HEADER}typedef plctag_debug_level_t debug_level_t;\n")
     set(GENERATED_HEADER "${GENERATED_HEADER}${DEBUG_LEVEL_ENTRIES}")
-    set(GENERATED_HEADER "${GENERATED_HEADER}    DEBUG_END = 6\n")
-    set(GENERATED_HEADER "${GENERATED_HEADER}} debug_level_t;\n\n")
+    set(GENERATED_HEADER "${GENERATED_HEADER}#define DEBUG_END (${LAST_DEBUG_LEVEL} + 1)\n\n")
     
     # Debug modules
     set(GENERATED_HEADER "${GENERATED_HEADER}/* Debug modules - generated from PLCTAG_MODULE_* defines */\n")

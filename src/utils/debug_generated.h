@@ -5,17 +5,17 @@
 #pragma once
 
 #include <stdint.h>
+#include <libplctag/lib/libplctag.h>
 
-/* Debug levels - generated from plctag_debug_level_t enum */
-typedef enum {
-    DEBUG_NONE = 0,
-    DEBUG_ERROR = 1,
-    DEBUG_WARN = 2,
-    DEBUG_INFO = 3,
-    DEBUG_DETAIL = 4,
-    DEBUG_SPEW = 5,
-    DEBUG_END = 6
-} debug_level_t;
+/* Debug levels - aliases of plctag_debug_level_t in libplctag.h, their only definition */
+typedef plctag_debug_level_t debug_level_t;
+#define DEBUG_NONE PLCTAG_DEBUG_NONE
+#define DEBUG_ERROR PLCTAG_DEBUG_ERROR
+#define DEBUG_WARN PLCTAG_DEBUG_WARN
+#define DEBUG_INFO PLCTAG_DEBUG_INFO
+#define DEBUG_DETAIL PLCTAG_DEBUG_DETAIL
+#define DEBUG_SPEW PLCTAG_DEBUG_SPEW
+#define DEBUG_END (PLCTAG_DEBUG_SPEW + 1)
 
 /* Debug modules - generated from PLCTAG_MODULE_* defines */
 typedef enum {
