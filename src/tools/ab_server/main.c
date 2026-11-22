@@ -73,6 +73,7 @@ static void parse_cip_tag(const char *tag, plc_s *plc);
 static bool lookup_atomic_type(const char *type_str, tag_type_t *type, size_t *size);
 static void parse_udt(const char *udt_str, plc_s *plc);
 static uint16_t udt_crc(udt_def_s *udt);
+static void fill_random(plc_s *plc, uint32_t seed);
 static byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice_t *reply, void *plc);
 
 /* tcp_server.c gives every accepted connection its own memcpy'd copy of the
@@ -271,6 +272,12 @@ void usage(void) {
      * in one string literal and the first half is already at that limit.
      */
     /* NOLINTNEXTLINE */
+    fprintf(stderr, "    Test data:\n"
+                    "        --random-fill=<seed>   start every numeric tag with pseudo-random bytes from <seed>\n"
+                    "                               instead of zeros, to find tests that expect zeros.  String\n"
+                    "                               and structure tags stay zero.  0, the default, is off.\n"
+                    "\n");
+    /* NOLINTNEXTLINE */
     fprintf(stderr, "    Fault injection, for testing client error handling:\n"
                     "        --dup-conn-id-tries=<n>\n"
                     "                               fail the next <n> ForwardOpen requests with a duplicate\n"
@@ -422,6 +429,13 @@ static const args_flag_def_t arg_flags[] = {
      "supported_size",
      "Connection size to offer with a 0x0109 rejection",
      {.has_default = true, .value.int_val = 508}},
+    {"random-fill",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "random-fill",
+     "Start numeric tags with pseudo-random bytes from this seed; 0 leaves them zero",
+     {.has_default = true, .value.int_val = 0}},
     {"delay-ms",
      ARGS_TYPE_FLOAT,
      ARGS_OPTIONAL,
@@ -584,6 +598,8 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
         log_info("Dropping the responses to the next %d connected CIP requests.", (int)args_get_int(&args, "no_reply"));
         atomic_store_int32(plc->no_reply_count, (int32_t)args_get_int(&args, "no_reply"));
     }
+
+    if(args_get_int(&args, "random-fill") != 0) { fill_random(plc, (uint32_t)args_get_int(&args, "random-fill")); }
 
     delay_ms = args_get_float(&args, "delay-ms");
     if(!(delay_ms >= 0.0 && delay_ms <= 3600000.0)) {
@@ -1394,4 +1410,34 @@ byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice
     }
 
     return rest;
+}
+
+
+/*
+ * --random-fill: every numeric tag starts with pseudo-random bytes from the seed, so a test
+ * that reads before it writes cannot pass by expecting zeros.  Strings and structures keep
+ * their zeros, because a random length word is not something a PLC would hold.
+ */
+void fill_random(plc_s *plc, uint32_t seed) {
+    uint32_t state = seed;
+
+    log_info("Filling the numeric tags with pseudo-random bytes from seed %u.", (unsigned int)seed);
+
+    for(tag_def_s *tag = plc->tags; tag; tag = tag->next_tag) {
+        size_t size = tag->elem_count * tag->elem_size;
+
+        if(tag->variable_elements || tag->udt || tag->tag_type == TAG_CIP_TYPE_STRING || tag->tag_type == TAG_CIP_TYPE_SHORT_STRING
+           || tag->tag_type == TAG_CIP_STRUCT_HANDLE_STRING || tag->tag_type == TAG_CIP_TYPE_STRUCT
+           || tag->tag_type == TAG_PCCC_TYPE_STRING) {
+            continue;
+        }
+
+        for(size_t i = 0; i < size; i++) {
+            /* xorshift32; the seed is never 0 here, so neither is the state. */
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            tag->data[i] = (uint8_t)state;
+        }
+    }
 }
