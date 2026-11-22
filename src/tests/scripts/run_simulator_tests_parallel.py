@@ -1103,8 +1103,10 @@ def build_manifest() -> Manifest:
                                pattern=r"Fault: closing the connection at once", expected=1, at_most=20))
 
     # A PLC that accepts every connection and drops it at once, for longer than the read waits:
-    # the client never gets past RegisterSession.  Each failed connect waits at least 100ms and
-    # the waits double, so the 5s read sees only a handful of connections.
+    # the client never gets past RegisterSession.  The TCP connect succeeded, so each drop counts as
+    # a drop, as for Modbus: the first 5 in a second wait 100ms, then the waits double, so the 5s read
+    # sees about 11 connections.  Treated as failed connects, with the waits doubling from the
+    # first, it would be 6 or 7.
     reg_drop_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
@@ -1118,7 +1120,7 @@ def build_manifest() -> Manifest:
     sec.test("check: the RegisterSession drop test's client backed off",
               None, T, depends_on=reg_drop_test.id, ports_needed=0,
               check=CheckSpec(log_file=reg_drop_test.server_log_file,
-                               pattern=r"Fault: closing the connection at once", expected=3, at_most=20))
+                               pattern=r"Fault: closing the connection at once", expected=8, at_most=20))
 
     # A PLC that sets up the session and connection, then drops it on the first request.  The
     # client must back off, not reconnect many times a second: the first 5 reconnects in a second
