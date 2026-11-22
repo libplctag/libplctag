@@ -307,10 +307,10 @@ typedef struct plc_s {
      * --close-every: close the connection, unanswered, on every Nth CIP data request (0 = never):
      * connected sends, and unconnected sends carrying an Unconnected Send.  Session setup and
      * ForwardOpen go through, so the client has a working session or connection when it is
-     * dropped.  The count is shared, as above; despite its name it counts both kinds.
+     * dropped.  The count is shared, as above.
      */
     int32_t close_every;
-    atomic_int32_t *connected_requests_seen;
+    atomic_int32_t *requests_seen;
 
     /*
      * One counter per fault_kind_t, for the deliberate response corruptions behind --corrupt.

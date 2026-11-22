@@ -85,7 +85,7 @@ static byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byt
 static atomic_int32_t g_dup_conn_id_tries;
 static atomic_int32_t g_empty_frag_count;
 static atomic_int32_t g_no_reply_count;
-static atomic_int32_t g_connected_requests_seen;
+static atomic_int32_t g_requests_seen;
 static atomic_int32_t g_reject_size_count;
 static atomic_int32_t g_link_offline_count;
 static atomic_int32_t g_out_of_conn_count;
@@ -186,7 +186,7 @@ int main(int argc, const char **argv) {
     plc.dup_conn_id_tries = &g_dup_conn_id_tries;
     plc.empty_frag_count = &g_empty_frag_count;
     plc.no_reply_count = &g_no_reply_count;
-    plc.connected_requests_seen = &g_connected_requests_seen;
+    plc.requests_seen = &g_requests_seen;
     plc.reject_size_count = &g_reject_size_count;
     plc.link_offline_count = &g_link_offline_count;
     plc.out_of_conn_count = &g_out_of_conn_count;
@@ -494,7 +494,7 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
     atomic_store_int32(plc->dup_conn_id_tries, 0);
     atomic_store_int32(plc->empty_frag_count, 0);
     atomic_store_int32(plc->no_reply_count, 0);
-    atomic_store_int32(plc->connected_requests_seen, 0);
+    atomic_store_int32(plc->requests_seen, 0);
     atomic_store_int32(plc->reject_size_count, 0);
     atomic_store_int32(plc->link_offline_count, 0);
     atomic_store_int32(plc->out_of_conn_count, 0);
@@ -1422,7 +1422,7 @@ byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice
 
     if(plc->close_every > 0
        && (eip_command == EIP_CONNECTED_SEND || (eip_command == EIP_UNCONNECTED_SEND && cip_service == CIP_SRV_UNCONNECTED_SEND))) {
-        int32_t seen = atomic_inc_int32(plc->connected_requests_seen);
+        int32_t seen = atomic_inc_int32(plc->requests_seen);
 
         if(seen % plc->close_every == 0) {
             log_info("Fault: closing the connection unanswered on request %d.", (int)seen);
