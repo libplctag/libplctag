@@ -487,6 +487,7 @@ int build_read_request(ab_tag_p tag, int byte_offset) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Request payload (%d bytes) exceeds available space (%d bytes)!",
                packet_payload_size, available_payload);
+        rc_dec(req); /* the new request is still only ours. */
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -502,6 +503,7 @@ int build_read_request(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        rc_dec(req); /* the new request is still only ours. */
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -536,11 +538,13 @@ int build_write_bit_request(ab_tag_p tag) {
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
                plc_tag_decode_error(rc));
+        rc_dec(req); /* the new request is still only ours. */
         return rc;
     }
 
     if(tag->write_data_per_packet < (tag->size * 2) + 2) { /* 2 masks plus a count word. */
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Insufficient space to write bit masks!");
+        rc_dec(req); /* the new request is still only ours. */
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -644,6 +648,7 @@ int build_write_bit_request(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        rc_dec(req); /* the new request is still only ours. */
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -683,6 +688,7 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
                plc_tag_decode_error(rc));
+        rc_dec(req); /* the new request is still only ours. */
         return rc;
     }
 
@@ -743,6 +749,7 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
         data += tag->encoded_type_info_size;
     } else {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
+        rc_dec(req); /* the new request is still only ours. */
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -789,6 +796,7 @@ int build_write_request(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        rc_dec(req); /* the new request is still only ours. */
         ab_tag_abort_request(tag);
         return rc;
     }

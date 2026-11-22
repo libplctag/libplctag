@@ -1149,6 +1149,7 @@ int listing_tag_build_read_request(ab_tag_p tag) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
+        rc_dec(req); /* the new request is still only ours. */
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -1165,6 +1166,7 @@ int listing_tag_build_read_request(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        rc_dec(req); /* the new request is still only ours. */
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -1590,6 +1592,7 @@ int udt_tag_build_read_metadata_request(ab_tag_p tag) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
+        rc_dec(req); /* the new request is still only ours. */
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -1604,6 +1607,7 @@ int udt_tag_build_read_metadata_request(ab_tag_p tag) {
     rc = session_add_request(tag->session, req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        rc_dec(req); /* the new request is still only ours. */
         ab_tag_abort_request(tag);
         return rc;
     }
