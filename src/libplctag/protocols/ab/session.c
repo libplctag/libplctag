@@ -1305,7 +1305,7 @@ static int fo_step(cip_conn_p session, session_sm_t *sm) {
             critical_block(&session->session_mutex) { session->max_payload_guess = fo->size; }
 
             /* the size picks the service: only the Large Forward Open carries more than 504 bytes. */
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Forward Open for %u bytes using the %s service.",
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Forward Open for %u bytes using the %s service.",
                    (unsigned int)fo->size, (fo->size > CIP_FO_PLAIN_MAX_SIZE ? "Large" : "plain"));
 
             encode_forward_open(session, fo->size > CIP_FO_PLAIN_MAX_SIZE);
