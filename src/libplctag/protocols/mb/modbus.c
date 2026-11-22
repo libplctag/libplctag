@@ -3500,7 +3500,7 @@ int mb_read_start(plc_tag_p p_tag) {
     }
 
     {
-        int64_t now = time_ms();
+        int64_t now = 0;
 
         /*
          * tag->op (and friends) must change under tag->plc->mutex, not before it: the PLC
@@ -3513,6 +3513,10 @@ int mb_read_start(plc_tag_p p_tag) {
          * future op_time), move it to now (single rotate); otherwise insert fresh.
          */
         critical_block(&tag->plc->mutex) {
+            /* the time is read under the lock, so this tag sorts after every tag already sent;
+             * find_response_tag() stops at the first tag that is not waiting for a reply. */
+            now = time_ms();
+
             tag_op_set(tag, TAG_OP_READ_REQUEST);
             tag->op_changed_time = now;
             tag->request_start_time = now;
@@ -3603,10 +3607,13 @@ static int mb_write_start(plc_tag_p p_tag) {
     }
 
     {
-        int64_t now = time_ms();
+        int64_t now = 0;
 
         /* tag->op must change under tag->plc->mutex -- see the comment in mb_read_start(). */
         critical_block(&tag->plc->mutex) {
+            /* read under the lock, as in mb_read_start(). */
+            now = time_ms();
+
             tag_op_set(tag, TAG_OP_WRITE_REQUEST);
             tag->op_changed_time = now;
 
