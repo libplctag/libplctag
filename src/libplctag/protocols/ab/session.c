@@ -171,6 +171,7 @@ static size_t frame_room(cip_conn_p session, bool connected);
 static int frame_cip_request(cip_conn_p session, bool connected, size_t cip_size);
 static int check_response_framing(cip_conn_p session, size_t *reply_offset);
 static int prepare_request(cip_conn_p session);
+static uint64_t next_sender_context(cip_conn_p session);
 static int send_begin(cip_conn_p session);
 static int send_some(cip_conn_p session, int timeout_ms);
 static void recv_begin(cip_conn_p session);
@@ -224,6 +225,16 @@ int session_startup(void) {
  *
  * A thread-safe function to get a new session sequence ID.
  */
+
+/* the encap sender context; under session_seq_id_lock, which tag threads take for the PCCC TNS. */
+static uint64_t next_sender_context(cip_conn_p session) {
+    uint64_t res = 0;
+
+    spin_block(&session->session_seq_id_lock) { res = ++session->session_seq_id; }
+
+    return res;
+}
+
 
 uint16_t session_get_new_seq_id(cip_conn_p session) {
     uint16_t res = 0;
@@ -964,8 +975,6 @@ void session_destroy(void *session_arg) {
     /* so remove the session from the list so no one else can reference it. */
     remove_session(session);
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session sent %" PRId64 " packets.", session->packet_count);
-
     /* terminate the session thread first. */
     atomic_set_int32(&session->terminating, 1);
 
@@ -984,6 +993,9 @@ void session_destroy(void *session_arg) {
             session->handler_thread = NULL;
         }
     }
+
+    /* after the join: the handler's Forward Close still counts packets. */
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session sent %" PRId64 " packets.", session->packet_count);
 
 
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
@@ -2612,13 +2624,13 @@ int prepare_request(cip_conn_p session) {
     /* set up the session sequence ID for this transaction */
     if(le2h16(encap->encap_command) == AB_EIP_UNCONNECTED_SEND) {
         /* get new ID */
-        session->session_seq_id++;
+        uint64_t seq_id = next_sender_context(session);
 
         // request->session_seq_id = session->session_seq_id;
-        encap->encap_sender_context = h2le64(session->session_seq_id); /* link up the request seq ID and the packet seq ID */
+        encap->encap_sender_context = h2le64(seq_id); /* link up the request seq ID and the packet seq ID */
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Preparing unconnected packet with session sequence ID %llx",
-               session->session_seq_id);
+               seq_id);
     } else if(le2h16(encap->encap_command) == AB_EIP_CONNECTED_SEND) {
         eip_cip_co_req *conn_req = (eip_cip_co_req *)(session->data);
 
@@ -2970,7 +2982,7 @@ void encode_plain_forward_open(cip_conn_p session) {
     fo->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->interface_handle))); /* total length of packet except for encap header */
     fo->encap_session_handle = h2le32(session->session_handle);
-    fo->encap_sender_context = h2le64(++session->session_seq_id);
+    fo->encap_sender_context = h2le64(next_sender_context(session));
     fo->router_timeout = h2le16(1); /* one second is enough ? */
 
     /* CPF parts */
@@ -3058,7 +3070,7 @@ void encode_large_forward_open(cip_conn_p session) {
     fo->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->interface_handle))); /* total length of packet except for encap header */
     fo->encap_session_handle = h2le32(session->session_handle);
-    fo->encap_sender_context = h2le64(++session->session_seq_id);
+    fo->encap_sender_context = h2le64(next_sender_context(session));
     fo->router_timeout = h2le16(1); /* one second is enough ? */
 
     /* CPF parts */
@@ -3176,7 +3188,7 @@ int session_forward_close(cip_conn_p session, exchange_t *ex) {
     fc->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fc->interface_handle))); /* total length of packet except for encap header */
     fc->encap_session_handle = h2le32(session->session_handle);
-    fc->encap_sender_context = h2le64(++session->session_seq_id);
+    fc->encap_sender_context = h2le64(next_sender_context(session));
     fc->router_timeout = h2le16(1); /* one second is enough ? */
 
     /* CPF parts */
