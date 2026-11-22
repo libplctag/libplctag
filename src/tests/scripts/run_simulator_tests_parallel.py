@@ -126,6 +126,8 @@ class CheckSpec:
     # "at least once": when the client retries a failing operation the same warning is logged
     # once per attempt, and the number of attempts is timing-dependent.
     at_least: bool = False
+    # An upper bound, with expected as the lower one: for "this happened, but not too often".
+    at_most: Optional[int] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -307,7 +309,7 @@ REQUIRED_EXECUTABLES = [
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect",  # DISABLED until rolled-back code returns: "test_retry_attr"
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
-    "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown", "test_shutdown_drain", "test_ab_server_framing",
+    "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown", "test_shutdown_drain", "test_ab_server_framing", "test_modbus_server_framing",
     "test_set_size_fixed", "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
@@ -330,6 +332,10 @@ def run_check(check: CheckSpec) -> tuple[bool, str]:
             count = sum(1 for line in f if pattern.search(line))
     except FileNotFoundError:
         return False, f"log file not found: {check.log_file}"
+    if check.at_most is not None:
+        if check.expected <= count <= check.at_most:
+            return True, f"found {count} matches in {check.log_file}"
+        return False, f"expected {check.expected} to {check.at_most} matches, found {count} in {check.log_file}"
     if (count >= check.expected) if check.at_least else (count == check.expected):
         return True, f"found {count} matches in {check.log_file}"
     return False, (f"expected {'at least ' if check.at_least else ''}{check.expected} matches, "
@@ -1078,6 +1084,59 @@ def build_manifest() -> Manifest:
               None, T, depends_on=no_large_fo_test.id, ports_needed=0,
               check=CheckSpec(log_file=no_large_fo_test.log_file,
                                pattern=r"Forward Open for 504 bytes using the plain service", expected=1))
+
+    # A PLC that is still starting up accepts connections and drops them.  The client backs off
+    # instead of storming it, and connects once it is up: 3s of drops, read timeout 10s.
+    startup_close_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--startup-close-ms=3000"],
+        startup_wait_s=1,
+    )
+    startup_close_test = sec.test("a PLC that drops connections while it starts up is connected to once it is up",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--timeout=10000"], T, server=startup_close_server)
+    sec.test("check: the starting-up PLC dropped connections, but was not stormed",
+              None, T, depends_on=startup_close_test.id, ports_needed=0,
+              check=CheckSpec(log_file=startup_close_test.server_log_file,
+                               pattern=r"Fault: closing the connection at once", expected=1, at_most=20))
+
+    # A PLC that accepts every connection and drops it at once, for longer than the read waits:
+    # the client never gets past RegisterSession.  Each failed connect waits at least 100ms and
+    # the waits double, so the 5s read sees only a handful of connections.
+    reg_drop_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--startup-close-ms=60000"],
+        startup_wait_s=1,
+    )
+    reg_drop_test = sec.test("a PLC that drops every connection before RegisterSession is not reconnected to in a storm",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--timeout=5000"], T, server=reg_drop_server, expect_failure=True)
+    sec.test("check: the RegisterSession drop test's client backed off",
+              None, T, depends_on=reg_drop_test.id, ports_needed=0,
+              check=CheckSpec(log_file=reg_drop_test.server_log_file,
+                               pattern=r"Fault: closing the connection at once", expected=3, at_most=20))
+
+    # A PLC that sets up the session and connection, then drops it on the first request.  The
+    # client must back off, not reconnect many times a second: the first 5 reconnects in a second
+    # wait 100ms, then the waits double.  In the 5s the read waits that is about 11 connections.
+    storm_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--close-every=1"],
+        startup_wait_s=1,
+    )
+    storm_test = sec.test("a PLC that drops every connection is not reconnected to in a storm",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--timeout=5000"], T, server=storm_server, expect_failure=True)
+    sec.test("check: the storm test's client backed off",
+              None, T, depends_on=storm_test.id, ports_needed=0,
+              check=CheckSpec(log_file=storm_test.server_log_file,
+                               pattern=r"Fault: closing the connection unanswered", expected=5, at_most=20))
 
     tiny_size_server = ServerSpec(
         exe_path=exe("ab_server"),
@@ -1907,6 +1966,39 @@ def build_manifest() -> Manifest:
               depends_on=dropped_pipelined.id, ports_needed=0,
               check=CheckSpec(log_file=dropped_pipelined.server_log_file, pattern=r"Fault: closing the connection",
                               expected=1, at_least=True))
+    # The server sends 40 bytes on each connection and closes: 12-byte write and 11-byte read replies
+    # never fill that exactly, so every close cuts a reply short.  The client must drop the partial
+    # reply and resend.  One request in flight leaves nothing unread at the server, so the partial
+    # reply always arrives; eight in flight also reads every whole reply in front of it.
+    for inflight_name, inflight_base in (("one request", mb_ops_base), ("eight requests", mb_inflight8)):
+        cut = sec.test(f"operations resent after a reply is cut short, {inflight_name} in flight (Modbus)",
+                  [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", inflight_base + mb_redial], F,
+                  server=mb_fault_server("--close-after-bytes=40"))
+        sec.test(f"check: the cut-reply test's server cut replies short, {inflight_name} in flight", None, F,
+                  depends_on=cut.id, ports_needed=0,
+                  check=CheckSpec(log_file=cut.server_log_file, pattern=r"Fault: closing the connection after",
+                                  expected=1, at_least=True))
+    # A device that accepts every connection and drops it on the first request.  The client must
+    # back off, not reconnect hundreds of times a second: the first 5 reconnects in a second wait
+    # 100ms, then the waits double.  In the 5s the read waits that is about 11 connections.
+    storm = sec.test("a device that drops every connection is not reconnected to in a storm (Modbus)",
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=hr0",
+               "--timeout=5000"], F, server=mb_fault_server("--close-every=1"), expect_failure=True)
+    sec.test("check: the storm test's client backed off", None, F, depends_on=storm.id, ports_needed=0,
+              check=CheckSpec(log_file=storm.server_log_file, pattern=r"Fault: closing the connection unanswered",
+                              expected=5, at_most=20))
+    # A device that is still starting up accepts connections and drops them: the client backs off
+    # and connects once it is up.  3s of drops, read timeout 10s.
+    startup = sec.test("a device that drops connections while it starts up is connected to once it is up (Modbus)",
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=hr0",
+               "--timeout=10000"], F, server=mb_fault_server("--startup-close-ms=3000"))
+    sec.test("check: the starting-up device dropped connections, but was not stormed (Modbus)", None, F,
+              depends_on=startup.id, ports_needed=0,
+              check=CheckSpec(log_file=startup.server_log_file, pattern=r"Fault: closing the connection at once",
+                              expected=1, at_most=20))
+    # A request that arrives in pieces waits in the server's buffer until it is whole.
+    sec.test("modbus_server request framing: requests split across reads",
+              [exe("test_modbus_server_framing"), "{PORT}"], F, server=mb_fault_server())
     sec.test("transaction ID wraps past 65535 (Modbus)",
               [exe("test_modbus_ops"), "--mode=tid-wrap", "--count=16", f"{mb_ops_base}&max_requests_in_flight=16"], S,
               server=mb_fault_server("--reorder=true"))
