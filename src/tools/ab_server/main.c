@@ -50,6 +50,7 @@
 #endif
 
 #include "args.h"
+#include "cip.h"
 #include "eip.h"
 #include "err.h"
 #include "fairness.h"
@@ -293,8 +294,9 @@ void usage(void) {
                     "                               supported.\n");
     /* NOLINTNEXTLINE */
     fprintf(stderr, "        --close-every=<n>      close the connection without answering on every <n>th\n"
-                    "                               connected CIP request.  Session setup and ForwardOpen\n"
-                    "                               go through, so the client was connected.\n"
+                    "                               CIP data request, connected or unconnected.  Session\n"
+                    "                               setup and ForwardOpen go through, so the client was\n"
+                    "                               connected.\n"
                     "        --startup-close-ms=<ms> for <ms> milliseconds after startup, accept every\n"
                     "                               connection and close it at once, as some PLCs do while\n"
                     "                               they start up.\n"
@@ -402,7 +404,7 @@ static const args_flag_def_t arg_flags[] = {
      ARGS_OPTIONAL,
      ARGS_ONCE,
      "close-every",
-     "Close the connection without answering on every Nth connected CIP request",
+     "Close the connection without answering on every Nth CIP data request, connected or unconnected",
      {.has_default = true, .value.int_val = 0}},
     {"startup-close-ms",
      ARGS_TYPE_INT,
@@ -1398,6 +1400,7 @@ byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice
     byte_slice_t rest = {0};
     uint16_t eip_command = 0;
     uint16_t eip_len = 0;
+    uint8_t cip_service = 0;
     byte_slice_t resp = {0};
 
     byte_slice_cut(output, 0, reply, NULL);
@@ -1410,8 +1413,15 @@ byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice
     rest = byte_slice_take(input, EIP_HEADER_SIZE + eip_len, &packet);
     if(byte_slice_has_error(rest)) { return input; }
 
-    /* --close-every: drop the connection before the request is acted on. */
-    if(eip_command == EIP_CONNECTED_SEND && plc->close_every > 0) {
+    /*
+     * --close-every: drop the connection before the request is acted on.  A data request is a
+     * connected send, or an unconnected send carrying an Unconnected Send: the CIP service is the
+     * first byte after the CPF prefix and its two item headers, 16 bytes past the EIP header.
+     */
+    byte_slice_read_u8(byte_slice_skip(packet, EIP_HEADER_SIZE + 16), &cip_service);
+
+    if(plc->close_every > 0
+       && (eip_command == EIP_CONNECTED_SEND || (eip_command == EIP_UNCONNECTED_SEND && cip_service == CIP_SRV_UNCONNECTED_SEND))) {
         int32_t seen = atomic_inc_int32(plc->connected_requests_seen);
 
         if(seen % plc->close_every == 0) {

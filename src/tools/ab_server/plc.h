@@ -304,9 +304,10 @@ typedef struct plc_s {
     int64_t startup_close_ms;
 
     /*
-     * --close-every: close the connection, unanswered, on every Nth connected CIP request (0 = never).
-     * Connected sends only, as with no_reply_count: session setup and ForwardOpen go through, so
-     * the client has a working connection when it is dropped.  The count is shared, as above.
+     * --close-every: close the connection, unanswered, on every Nth CIP data request (0 = never):
+     * connected sends, and unconnected sends carrying an Unconnected Send.  Session setup and
+     * ForwardOpen go through, so the client has a working session or connection when it is
+     * dropped.  The count is shared, as above; despite its name it counts both kinds.
      */
     int32_t close_every;
     atomic_int32_t *connected_requests_seen;

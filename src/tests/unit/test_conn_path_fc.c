@@ -78,6 +78,15 @@ static void test_forward_close_header(void **state) {
 }
 
 
+/* the shared counter wraps past 0, which would read as "not set yet". */
+static void test_connection_id_skips_zero(void **state) {
+    (void)state;
+    atomic_set_int32(&connection_id, -2); /* 0xFFFFFFFE */
+    assert_true(next_connection_id() == 0xFFFFFFFFu);
+    assert_true(next_connection_id() == 1);
+}
+
+
 /* every Forward Open carries a connection ID of its own, reconnects of one session included. */
 static void test_fresh_connection_id_per_forward_open(void **state) {
     static uint8_t path[2] = {0x01, 0x00};
@@ -254,6 +263,7 @@ int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_forward_close_header),
         cmocka_unit_test(test_fresh_connection_id_per_forward_open),
+        cmocka_unit_test(test_connection_id_skips_zero),
         cmocka_unit_test(test_path_fits_8_bits),
         cmocka_unit_test(test_ip_addr_segment),
         cmocka_unit_test(test_dhp_shares_connection),

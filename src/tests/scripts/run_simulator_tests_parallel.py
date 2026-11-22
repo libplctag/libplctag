@@ -1137,6 +1137,14 @@ def build_manifest() -> Manifest:
               None, T, depends_on=storm_test.id, ports_needed=0,
               check=CheckSpec(log_file=storm_test.server_log_file,
                                pattern=r"Fault: closing the connection unanswered", expected=5, at_most=20))
+    unconnected_storm_test = sec.test("a PLC that drops every unconnected request's connection is not reconnected to in a storm",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray&use_connected_msg=0",
+               "--timeout=5000"], T, server=storm_server, expect_failure=True)
+    sec.test("check: the unconnected storm test's client backed off",
+              None, T, depends_on=unconnected_storm_test.id, ports_needed=0,
+              check=CheckSpec(log_file=unconnected_storm_test.server_log_file,
+                               pattern=r"Fault: closing the connection unanswered", expected=5, at_most=20))
 
     tiny_size_server = ServerSpec(
         exe_path=exe("ab_server"),
