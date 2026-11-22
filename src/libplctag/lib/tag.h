@@ -234,64 +234,69 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
  * The base type only has a vtable for operations.
  */
 
-/* NB: sorted by decreasing size and then alphabetically */
+/*
+ * NB: grouped by alignment, largest first, so the compiler adds no padding between fields:
+ * 64-bit, then structs aligned to 8, then pointers (8 or 4 bytes by platform), then 32-bit,
+ * then 8-bit, then the bitfields.  Alphabetical within a group.  atomic_bool is 4 bytes on
+ * Windows; it stays with the 8-bit fields so every platform has one order.
+ */
 
 #define TAG_BASE_STRUCT                      \
     int64_t auto_sync_next_read;             \
     int64_t auto_sync_next_write;            \
-    int64_t read_cache_expire;               \
-    int64_t read_cache_ms;                   \
-    uint8_t *data;                           \
-    /* data is part of the tag's own allocation, so it cannot be resized. */ \
-    bool data_is_fixed;                      \
-    tag_byte_order_t *byte_order;            \
-    cond_p tag_cond_wait;                    \
-    mutex_t api_mutex;                       \
-    mutex_t ext_mutex;                       \
-    tag_extended_callback_func callback;     \
-    tag_vtable_p vtable;                     \
-    lib_instance_p instance;                 \
-    void *userdata;                          \
-    int32_t auto_sync_read_ms;               \
-    int32_t auto_sync_write_ms;              \
-    /* seconds without a read or write before the tickler destroys the tag; 0 = off.  Atomic: \
-     * the tickler reads it without api_mutex to pick its tags. */ \
-    atomic_int32_t destroy_idle_sec;         \
     /* last read or write start, or auto-destroy change.  Under api_mutex. */ \
     int64_t last_activity_ms;                \
-    /* reads the tickler has completed, and the last one's result, so a waiting plc_tag_read() \
-     * knows its own read ended even if the next one has started.  Under api_mutex. */ \
-    uint32_t reads_done;                     \
-    int8_t last_read_rc;                     \
-    /* created with find_or_create_tag=1. */ \
-    bool find_or_create_tag;                 \
-    /* the tag string while the tag is in the reuse table.  Under tag_lookup_mutex. */ \
-    char *reuse_key;                         \
-    /* the create has ended, and how.  Under api_mutex. */ \
-    bool create_done;                        \
-    int8_t create_result;                    \
-    int32_t size;                            \
-    int32_t tag_id;                          \
-    int connection_group_id;                 \
-    int bit;                                 \
+    int64_t read_cache_expire;               \
+    int64_t read_cache_ms;                   \
+    mutex_t api_mutex;                       \
+    mutex_t ext_mutex;                       \
+    tag_byte_order_t *byte_order;            \
+    tag_extended_callback_func callback;     \
     /* the tag's connection (CIP session or Modbus PLC), NULL if it has none.  The protocol's   \
      * own field holds the reference; this is a copy for plc_tag_create_from_tag(), which  \
      * passes the source tag to create_func.  Set once during create. */                   \
     void *conn;                              \
     tag_create_function create_func;         \
+    uint8_t *data;                           \
+    lib_instance_p instance;                 \
+    /* the tag string while the tag is in the reuse table.  Under tag_lookup_mutex. */ \
+    char *reuse_key;                         \
+    cond_p tag_cond_wait;                    \
+    void *userdata;                          \
+    tag_vtable_p vtable;                     \
+    int32_t auto_sync_read_ms;               \
+    int32_t auto_sync_write_ms;              \
+    int32_t bit;                             \
+    int32_t connection_group_id;             \
+    /* seconds without a read or write before the tickler destroys the tag; 0 = off.  Atomic: \
+     * the tickler reads it without api_mutex to pick its tags. */ \
+    atomic_int32_t destroy_idle_sec;         \
+    /* reads the tickler has completed, and the last one's result (last_read_rc), so a waiting \
+     * plc_tag_read() knows its own read ended even if the next one has started.  Under api_mutex. */ \
+    uint32_t reads_done;                     \
+    int32_t size;                            \
+    int32_t tag_id;                          \
+    tag_event_t events[TAG_EVENT_RING_SIZE]; \
     atomic_bool abort_requested;             \
     /* Read by tag_tickler_func() under the global tag_lookup_mutex, while every other  \
      * field below is written under this tag's own per-tag api_mutex -- a different     \
      * lock domain. Packing it into the bitfield run below would race with writes to    \
      * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */  \
     atomic_bool skip_tickler;                \
-    tag_event_t events[TAG_EVENT_RING_SIZE]; \
-    uint8_t event_head;  /* next to deliver */ \
-    uint8_t event_count; /* queued */          \
-    /* inside the dispatch loop, so nested raises only queue.  Under api_mutex. */ \
-    bool dispatching;                        \
     /* bumped by every abort, so a caller can see an abort raised from a callback.  Under api_mutex. */ \
     uint8_t abort_count;                     \
+    /* the create has ended, and how.  Under api_mutex. */ \
+    bool create_done;                        \
+    int8_t create_result;                    \
+    /* data is part of the tag's own allocation, so it cannot be resized. */ \
+    bool data_is_fixed;                      \
+    /* inside the dispatch loop, so nested raises only queue.  Under api_mutex. */ \
+    bool dispatching;                        \
+    uint8_t event_count; /* queued */          \
+    uint8_t event_head;  /* next to deliver */ \
+    /* created with find_or_create_tag=1. */ \
+    bool find_or_create_tag;                 \
+    int8_t last_read_rc;                     \
     int8_t status;                           \
     uint8_t allow_field_resize : 1;          \
     /* holds PLC data, so destroy_idle_sec applies. */ \
