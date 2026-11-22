@@ -279,21 +279,21 @@ static void test_degenerate_bounds_are_clamped(void **state) {
 }
 
 
-/* The Modbus module's bounds, which differ from CIP's, must behave the same way. */
+/* The Modbus module's bounds -- 100ms and, by default, 10s -- must behave the same way. */
 static void test_modbus_bounds_behave_the_same(void **state) {
     (void)state;
 
     backoff_t backoff;
     int32_t attempt = 0;
 
-    backoff_init(&backoff, 50, 5000);
+    backoff_init(&backoff, 100, 10000);
 
     for(attempt = 0; attempt < TEST_LONG_OUTAGE_ATTEMPTS; attempt++) {
         int64_t wait_ms = backoff_wait_ms(&backoff);
 
-        assert_in_range(wait_ms, 1, 5000);
+        assert_in_range(wait_ms, 1, 10000);
 
-        if(attempt >= TEST_SATURATED_AFTER) { assert_in_range(wait_ms, 2500, 5000); }
+        if(attempt >= TEST_SATURATED_AFTER) { assert_in_range(wait_ms, 5000, 10000); }
     }
 }
 
