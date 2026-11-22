@@ -313,7 +313,7 @@ REQUIRED_EXECUTABLES = [
     "test_set_size_fixed", "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
-    "test_bit_write", "test_auto_destroy", "test_find_or_create_tag", "test_many_tags", "test_request_churn",
+    "test_bit_write", "test_auto_destroy", "test_reconnect_cycles", "test_find_or_create_tag", "test_many_tags", "test_request_churn",
 ]
 
 
@@ -724,6 +724,10 @@ def build_manifest() -> Manifest:
                f"--conn-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection"], T)
     sec.test("idle disconnect and reconnect with runtime timeout change (AB ControlLogix)",
               [exe("test_idle_disconnect"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], T)
+    sec.test("reconnect 20 times in a row with a new connection ID each time (AB ControlLogix)",
+              [exe("test_reconnect_cycles"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               f"--conn-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection"], T)
     # DISABLED until rolled-back code returns
     # sec.test("connection_retry_max_delay_ms read, written and clamped live (AB ControlLogix)",
     # [exe("test_retry_attr"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], F)

@@ -180,7 +180,7 @@ REQUIRED_EXECUTABLES = [
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy", "test_request_churn",
     "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy", "test_find_or_create_tag",
-    "test_tag_listing_reread", "test_create_fail_callback", "perf_benchmark",
+    "test_tag_listing_reread", "test_create_fail_callback", "perf_benchmark", "test_reconnect_cycles",
 ]
 
 
@@ -222,6 +222,13 @@ def build_manifest() -> list[Test]:
         test("idle disconnect and reconnect with runtime timeout change (ControlLogix)",
              [exe("test_idle_disconnect"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray"]),
+        # 20 reconnects in a row, each idled out with Forward Close.  Every Forward Open carries a
+        # new connection ID and restarts the sequence count; a PLC that still holds the ID refuses
+        # it.  Reads only, so it is safe on a shared tag.
+        test("reconnect 20 times in a row with a new connection ID each time (ControlLogix)",
+             [exe("test_reconnect_cycles"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestBigArray",
+              f"--conn-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
         # Reads only, so it is safe on a shared tag.  The --conn-tag run idles the connection
         # out and checks the destroy does not bring it back.
         test("auto-destroy idle tags (ControlLogix)",
