@@ -312,6 +312,7 @@ static tag_byte_order_t modbus_tag_byte_order = {.is_allocated = 0,
 /* Modbus module globals. */
 static mutex_t mb_mutex;
 static modbus_plc_p plcs = NULL;
+static bool mb_shutting_down = false; /* under mb_mutex: set by mb_teardown(), cleared by mb_init() */
 
 /* PLC lifecycle management */
 
@@ -697,6 +698,13 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
             break;
         }
 
+        /* mb_teardown() has started: a handler made now would never be joined. */
+        if(mb_shutting_down) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "The library is shutting down, not creating a new PLC.");
+            rc = PLCTAG_ERR_NOT_ALLOWED;
+            break;
+        }
+
         /* we did not find a matching PLC, create a new one. */
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "No matching PLC found, creating a new one.");
 
@@ -780,13 +788,11 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to allocate Modbus PLC object!");
             rc = PLCTAG_ERR_NO_MEM;
         }
-    }
 
-    /* if everything went well and it is new, set up the new PLC. */
-    if(rc == PLCTAG_STATUS_OK && is_new) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Initializing new PLC.");
+        /* still under mb_mutex, so mb_teardown() sees either no PLC or one with its handler thread set. */
+        if(rc == PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Initializing new PLC.");
 
-        do {
             /*
              * With deferred cleanup, the handler thread does NOT need to hold an explicit
              * reference to the PLC. The tags hold the references through tag->plc pointers.
@@ -802,12 +808,10 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to create new handler thread, error %s!",
                        plc_tag_decode_error(rc));
-                break;
+            } else {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Created thread %p.", (void *)(*plc)->handler_thread);
             }
-
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Created thread %p.", (void *)(*plc)->handler_thread);
-
-        } while(0);
+        }
     }
 
     if(rc != PLCTAG_STATUS_OK && *plc) {
@@ -4206,6 +4210,8 @@ int mb_init(void) {
         }
     }
 
+    critical_block(&mb_mutex) { mb_shutting_down = false; }
+
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Done.");
 
     return rc;
@@ -4221,6 +4227,8 @@ extern void mb_teardown(void) {
 
     /* mb_init() never ran: no PLCs. */
     if(!mb_mutex.initialized) { return; }
+
+    critical_block(&mb_mutex) { mb_shutting_down = true; }
 
     for(;;) {
         modbus_plc_p plc = NULL;
