@@ -105,8 +105,23 @@ static void test_mem_free(const void *mem) {
 }
 
 
+/* the line came from func: the debug prefix names it as " func:<line>". */
+static bool logged_by(const char *message, const char *func) {
+    size_t len = strlen(func);
+
+    for(const char *at = strstr(message, func); at; at = strstr(at + 1, func)) {
+        if(at > message && at[-1] == ' ' && at[len] == ':') { return true; }
+    }
+
+    return false;
+}
+
+
 static void logger(int32_t tag_id, int debug_level, const char *message) {
-    if(tag_id == POISON_TAG_ID) { saw_poison = true; }
+    const char *func = watch_func;
+
+    /* C1 is about the API call's own code.  The tickler thread logs the tag's ID too, but under its own reference. */
+    if(tag_id == POISON_TAG_ID && func && logged_by(message, func)) { saw_poison = true; }
 
     if(strstr(message, " plc_tag_register_logger:") || strstr(message, " plc_tag_unregister_logger:")) {
         logger_lines++;
