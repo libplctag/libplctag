@@ -40,5 +40,6 @@
 /* these are definitions used outside of the Modbus module. */
 
 extern int mb_init(void);
+extern void mb_teardown(void);
 extern plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                void *userdata, plc_tag_p src_tag);
