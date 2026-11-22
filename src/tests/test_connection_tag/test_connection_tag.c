@@ -386,13 +386,14 @@ static int poll_connection_states(int32_t tag, int64_t end_time) {
  * activity.  It can be shared with find_or_create_tag.  Returns the number of failures.
  */
 static int check_attribute_rules(void) {
+    /* its own connection group: a connection left from these checks must not be the one the real test joins. */
     char attribs[1024];
     int failed = 0;
     int32_t a = 0;
     int32_t b = 0;
     int32_t rc = 0;
 
-    snprintf(attribs, sizeof(attribs), "%s&destroy_tag_after_idle_sec=10", tag_path);
+    snprintf(attribs, sizeof(attribs), "%s&connection_group_id=999&destroy_tag_after_idle_sec=10", tag_path);
     rc = plc_tag_create(attribs, 0);
     if(rc != PLCTAG_ERR_BAD_PARAM) {
         fprintf(stderr, "FAIL: create with destroy_tag_after_idle_sec gave %s, expected PLCTAG_ERR_BAD_PARAM.\n",
@@ -401,7 +402,7 @@ static int check_attribute_rules(void) {
     }
     if(rc >= 0) { plc_tag_destroy(rc); }
 
-    snprintf(attribs, sizeof(attribs), "%s&find_or_create_tag=1", tag_path);
+    snprintf(attribs, sizeof(attribs), "%s&connection_group_id=999&find_or_create_tag=1", tag_path);
     a = plc_tag_create(attribs, 0);
     b = plc_tag_create(attribs, 0);
     if(a < 0 || a != b) {
