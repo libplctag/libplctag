@@ -204,6 +204,18 @@ static void unconnected_step(cip_conn_p session, struct session_sm_s *sm);
 static mutex_t session_mutex;
 static cip_conn_p sessions = NULL;
 
+/*
+ * Why is connection_id global?  Because it looks like the PLC might
+ * be treating it globally.  I am seeing ForwardOpen errors that seem
+ * to be because of duplicate connection IDs even though the session
+ * was closed.
+ *
+ * So, this is more or less unique across all invocations of the library.
+ * FIXME - this could collide.  The probability is low, but it could happen
+ * as there are only 32 bits.
+ */
+static atomic_int32_t connection_id = ATOMIC_INT_STATIC_INIT;
+
 
 int session_startup(void) {
     int rc = PLCTAG_STATUS_OK;
@@ -530,8 +542,6 @@ cip_conn_p find_session_by_host_unsafe(const char *host, const char *path, int c
 
 cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, const char *path,
                                    plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
-    static volatile uint32_t connection_id = 0;
-
     int rc = PLCTAG_STATUS_OK;
     cip_conn_p session = CIP_CONN_NULL;
     size_t total_allocation_size = sizeof(*session);
@@ -675,7 +685,9 @@ cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, con
     }
 
     /* check for ID set up. This does not need to be thread safe since we just need a random value. */
-    if(connection_id == 0) { connection_id = (uint32_t)(random_u64(UINT32_MAX) + 1); }
+    if(atomic_get_int32(&connection_id) == 0) {
+        atomic_set_int32(&connection_id, (int32_t)(uint32_t)(random_u64(UINT32_MAX) + 1));
+    }
 
     /* fix up the rest of teh fields */
     session->plc_type = plc_type;
@@ -705,17 +717,8 @@ cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, con
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_group_id to %d.", connection_group_id);
     session->connection_group_id = connection_group_id;
 
-    /*
-     * Why is connection_id global?  Because it looks like the PLC might
-     * be treating it globally.  I am seeing ForwardOpen errors that seem
-     * to be because of duplicate connection IDs even though the session
-     * was closed.
-     *
-     * So, this is more or less unique across all invocations of the library.
-     * FIXME - this could collide.  The probability is low, but it could happen
-     * as there are only 32 bits.
-     */
-    session->orig_connection_id = ++connection_id;
+    /* ++connection_id, atomically: the Forward Open encoders take the next one on each session's own thread. */
+    session->orig_connection_id = (uint32_t)atomic_add_int32(&connection_id, 1) + 1;
 
     /* create the session mutex. */
     if((rc = mutex_init(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
@@ -1360,6 +1363,9 @@ static int fo_step(cip_conn_p session, session_sm_t *sm) {
 
             session->targ_connection_id = le2h32(resp->orig_to_targ_conn_id);
             session->orig_connection_id = le2h32(resp->targ_to_orig_conn_id);
+
+            /* the sequence count belongs to the connection: a new one starts over. */
+            session->conn_seq_num = 0;
 
             critical_block(&session->session_mutex) { session->max_payload_size = session->max_payload_guess; }
 
@@ -3007,6 +3013,8 @@ void encode_plain_forward_open(cip_conn_p session) {
     fo->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick, no used? */
     fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
+    /* a fresh ID for every Forward Open, reconnects included; see the comment on connection_id. */
+    session->orig_connection_id = (uint32_t)atomic_add_int32(&connection_id, 1) + 1;
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
     session->conn_serial_number = next_conn_serial_number(session->conn_serial_number);
@@ -3095,6 +3103,8 @@ void encode_large_forward_open(cip_conn_p session) {
     fo->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick, no used? */
     fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
+    /* a fresh ID for every Forward Open, reconnects included; see the comment on connection_id. */
+    session->orig_connection_id = (uint32_t)atomic_add_int32(&connection_id, 1) + 1;
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
     session->conn_serial_number = next_conn_serial_number(session->conn_serial_number);

@@ -78,6 +78,33 @@ static void test_forward_close_header(void **state) {
 }
 
 
+/* every Forward Open carries a connection ID of its own, reconnects of one session included. */
+static void test_fresh_connection_id_per_forward_open(void **state) {
+    static uint8_t path[2] = {0x01, 0x00};
+    cip_conn_p session = NULL;
+    uint32_t first = 0;
+    uint32_t second = 0;
+
+    (void)state;
+
+    session = (cip_conn_p)calloc(1, sizeof(*session));
+    assert_non_null(session);
+    session->conn_path = path;
+    session->conn_path_size = (uint8_t)sizeof(path);
+
+    encode_forward_open(session, false);
+    first = le2h32(((eip_forward_open_request_t *)session->data)->targ_to_orig_conn_id);
+
+    encode_forward_open(session, false);
+    second = le2h32(((eip_forward_open_request_t *)session->data)->targ_to_orig_conn_id);
+
+    assert_true(first != second);
+    assert_true(second == session->orig_connection_id);
+
+    free(session);
+}
+
+
 /* n port segments of "1": one byte each. */
 static int encode_n(int n, int needs_connection, int *size) {
     static char path[1024];
@@ -226,6 +253,7 @@ static void test_find_matches_messaging(void **state) {
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_forward_close_header),
+        cmocka_unit_test(test_fresh_connection_id_per_forward_open),
         cmocka_unit_test(test_path_fits_8_bits),
         cmocka_unit_test(test_ip_addr_segment),
         cmocka_unit_test(test_dhp_shares_connection),
