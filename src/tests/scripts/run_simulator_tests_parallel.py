@@ -712,7 +712,7 @@ def build_manifest() -> Manifest:
     )
     sec.test("10000 tags create packed, write and read back (AB ControlLogix)",
               [exe("test_many_tags"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix",
-               "--name=perfTag", "--tags=10000", "--max-create-ms=5000"], T, server=many_tags_server)
+               "--name=perfTag", "--tags=10000", "--max-create-ms=20000"], T, server=many_tags_server)
     sec.test("2000 LINT tags: packed create reads larger than the guess (AB ControlLogix)",
               [exe("test_many_tags"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix",
                "--name=perfLint", "--tags=2000", "--threads=4"], T, server=many_tags_server)

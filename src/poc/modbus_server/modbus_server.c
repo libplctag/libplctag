@@ -43,6 +43,7 @@
 #ifdef _WIN32
 #    include <winsock2.h>
 #    include <ws2tcpip.h>
+#    define SHUT_WR SD_SEND
 #else
 #    include <sys/socket.h>
 #    include <netinet/in.h>
@@ -178,6 +179,9 @@ struct modbus_client_s {
      * In the client, not locals: a coroutine's locals do not survive coro_yield(). */
     int64_t bytes_sent;
     bool close_after_send;
+
+    /* --close-after-bytes: the send side is shut; requests are dropped until the client closes. */
+    bool draining;
 };
 
 
@@ -479,6 +483,11 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         modbus_parse_mbap_header(&client->recv_buf, &client->mbap_header);
         size_t frame_size = (size_t)6 + client->mbap_header.length; /* MBAP length counts from the unit ID */
 
+        if(client->draining) {
+            buf_read_advance(&client->recv_buf, frame_start + frame_size - buf_read_pos(&client->recv_buf));
+            continue;
+        }
+
         client->server->requests_seen++;
         if(client->server->close_every > 0 && (client->server->requests_seen % client->server->close_every) == 0) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Fault: closing the connection unanswered on request %" PRId64 ".",
@@ -595,7 +604,12 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         if(client->close_after_send) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Fault: closing the connection after %" PRId64 " bytes sent.",
                   client->bytes_sent);
-            break;
+
+            /* shut only the send side and read on: closing with requests unread resets the connection,
+             * and Windows then throws away the replies the client has not read yet. */
+            shutdown(fd, SHUT_WR);
+            client->draining = true;
+            continue;
         }
 
         /* the reply held back for --reorder goes out after the one that overtook it. */
