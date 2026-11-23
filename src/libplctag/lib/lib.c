@@ -59,7 +59,8 @@
 
 #define INITIAL_TAG_TABLE_SIZE (201)
 
-#define TAG_ID_MASK (0xFFFFFFF)
+/* IDs use the whole positive int32_t range, so a wrap takes 2^31 creates (#681). */
+#define TAG_ID_MASK (INT32_MAX)
 
 /* these are only internal to the file */
 
@@ -2051,7 +2052,8 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
 
-    if(tag_id <= 0 || tag_id >= TAG_ID_MASK) {
+    /* every positive int32_t is a valid ID, up to TAG_ID_MASK itself (#681). */
+    if(tag_id <= 0) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Called with zero or invalid tag!");
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -4975,9 +4977,8 @@ int tag_id_inc(int id) {
         id = (TAG_ID_MASK / 2);
     }
 
-    id = (id + 1) & TAG_ID_MASK;
-
-    if(id == 0) { id = 1; /* skip zero intentionally! Can't return an ID of zero because it looks like a NULL pointer */ }
+    /* wrap to 1 before id + 1 overflows, and skip zero: an ID of zero looks like a NULL pointer. */
+    id = (id >= TAG_ID_MASK) ? 1 : id + 1;
 
     return id;
 }

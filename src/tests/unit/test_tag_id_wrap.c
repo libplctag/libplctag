@@ -78,9 +78,37 @@ static void test_create_after_wrap_onto_live_tags(void **state) {
 }
 
 
+/*
+ * IDs run up to INT32_MAX.  The last one is handed out like any other, so it must be
+ * destroyable too, and the next create wraps to 1 without overflowing.
+ */
+static void test_destroy_highest_id(void **state) {
+    int32_t id = 0;
+
+    (void)state;
+
+    next_tag_id = TAG_ID_MASK - 1;
+
+    id = plc_tag_create(SYSTEM_TAG, 0);
+    printf("  create at the top of the ID range returned %" PRId32 ".\n", id);
+    assert_int_equal(id, INT32_MAX);
+
+    assert_int_equal(plc_tag_destroy(id), PLCTAG_STATUS_OK);
+    assert_int_equal(plc_tag_status(id), PLCTAG_ERR_NOT_FOUND);
+
+    /* the earlier test never used IDs below 10, so 1 is free. */
+    id = plc_tag_create(SYSTEM_TAG, 0);
+    printf("  create after the top of the ID range returned %" PRId32 ".\n", id);
+    assert_int_equal(id, 1);
+
+    plc_tag_destroy(id);
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_create_after_wrap_onto_live_tags),
+        cmocka_unit_test(test_destroy_highest_id),
     };
 
     int rc = cmocka_run_group_tests(tests, NULL, NULL);
