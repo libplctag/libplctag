@@ -356,8 +356,10 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
     critical_block(&session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
         if(shared_session) {
-            /* a tag that names its PLC says how it messages; one that does not takes whatever identify finds. */
-            session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id, plc ? use_connected_msg : -1);
+            /* a tag that names its PLC says how it messages; one that does not takes whatever identify finds.
+             * Generic CIP (@identity only) works either way, so it shares any connection. */
+            session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id,
+                                                  (plc && plc->id != AB_PLC_GENERIC) ? use_connected_msg : -1);
         } else {
             /* no sharing, create a new one */
             session = CIP_CONN_NULL;
@@ -440,6 +442,16 @@ bool session_connected_conflicts(cip_conn_p session, int use_connected_msg) {
     }
 
     return conflicts;
+}
+
+
+extern bool session_is_connected(cip_conn_p session) {
+    bool connected = false;
+
+    /* until identify sets the PLC type the connection is unconnected, and may change. */
+    critical_block(&session->session_mutex) { connected = session->plc_type != AB_PLC_NONE && session->use_connected_msg != 0; }
+
+    return connected;
 }
 
 

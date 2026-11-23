@@ -18,6 +18,7 @@ endif()
   busy_test
   data_dumper
   get_identity
+  identity_shared
   multithread
   multithread_cached_read
   multithread_plc5

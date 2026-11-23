@@ -302,7 +302,7 @@ def kill_stray_servers() -> None:
 
 
 REQUIRED_EXECUTABLES = [
-    "ab_server", "modbus_server", "list_tags_logix", "test_tag_listing_reread", "scan_eip_network", "get_identity", "test_create_shutdown_race",
+    "ab_server", "modbus_server", "list_tags_logix", "test_tag_listing_reread", "scan_eip_network", "get_identity", "identity_shared", "test_create_shutdown_race",
     "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
     "test_callback_destroy", "test_timeout_next", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops", "test_modbus_split_write",
@@ -413,6 +413,23 @@ def build_manifest() -> Manifest:
     sec.test("identity, Logix, unconnected",
               [exe("get_identity"),
                f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&use_connected_msg=0&name=@identity&debug=3"], F)
+    # @identity in a process that already has a Logix tag open (issue 690).  A generic or no-plc
+    # @identity shares whatever connection is there and messages its way; a named PLC type only
+    # shares a connection that messages the way it asks; another connection group never shares.
+    lgx_tag = f"protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"
+    lgx_id = f"protocol=ab_eip&gateway={gw}&path=1,0&name=@identity"
+    for desc, first, ident, sessions, connected in (
+            ("generic @identity shares a connected Logix connection", lgx_tag, "&plc=generic", 1, 1),
+            ("no-plc @identity shares a connected Logix connection", lgx_tag, "", 1, 1),
+            ("Logix @identity shares a connected Logix connection", lgx_tag, "&plc=ControlLogix", 1, 1),
+            ("generic @identity shares an unconnected Logix connection", lgx_tag + "&use_connected_msg=0", "&plc=generic", 1, 0),
+            ("connected Logix @identity does not share an unconnected connection",
+             lgx_tag + "&use_connected_msg=0", "&plc=ControlLogix", 2, 1),
+            ("unconnected Logix @identity does not share a connected connection",
+             lgx_tag, "&plc=ControlLogix&use_connected_msg=0", 2, 0),
+            ("generic @identity in another connection group opens its own", lgx_tag, "&plc=generic&connection_group_id=7", 2, 0)):
+        sec.test(desc, [exe("identity_shared"), f"--tag={first}", f"--identity={lgx_id}{ident}",
+                        f"--expect-sessions={sessions}", f"--expect-connected={connected}"], F)
     # "STRING" is a different type on each PLC family: a UDT sent as an abbreviated struct
     # (a0 02 ce 0f) on Logix, SHORT_STRING on Micro800, the plain CIP STRING on Omron.  The
     # element stride differs with it (88/83/84 bytes), so writing one element of an array and

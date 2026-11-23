@@ -397,6 +397,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     tag->conn = tag->session;
     tag->create_func = ab_tag_create;
 
+    /* generic CIP shares any connection, so it messages the way that connection does. */
+    if(plc && plc->id == AB_PLC_GENERIC) { tag->use_connected_msg = session_is_connected(tag->session) ? 1 : 0; }
+
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", (void *)tag->session);
 
     if(!plc) {
