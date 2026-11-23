@@ -123,6 +123,41 @@ static void read_tag(int32_t tag) {
 }
 
 
+/*
+ * An out-of-range timeout in the tag string is clamped to 100-30000ms, the same as a set (#689).
+ * The value only counts for the tag that creates the connection, so this uses its own group.
+ */
+static void check_create_clamp(int32_t requested_ms, int32_t expected_ms) {
+    char probe_path[1024];
+    int32_t probe = 0;
+    int32_t value = 0;
+
+    compat_snprintf(probe_path, sizeof(probe_path), "%s&connection_group_id=99&connection_inactivity_timeout_ms=%" PRId32,
+                    tag_path, requested_ms);
+
+    probe = plc_tag_create(probe_path, DATA_TIMEOUT);
+    if(probe < 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR %s: Could not create the tag with a timeout of %" PRId32 " ms!\n", plc_tag_decode_error(probe),
+                requested_ms);
+        exit(1);
+    }
+
+    value = (int32_t)plc_tag_get_int_attribute(probe, "connection_inactivity_timeout_ms", 0);
+    plc_tag_destroy(probe);
+
+    if(value != expected_ms) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: a timeout of %" PRId32 " ms at create became %" PRId32 " ms, expected %" PRId32 " ms.\n",
+                requested_ms, value, expected_ms);
+        exit(1);
+    }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "A timeout of %" PRId32 " ms at create was clamped to %" PRId32 " ms.\n", requested_ms, value);
+}
+
+
 static void wait_until(int64_t end_time_ms) {
     int64_t now_ms = compat_time_ms();
     int64_t start_time_ms = now_ms;
@@ -162,6 +197,9 @@ int main(int argc, char **argv) {
     parse_args(argc, argv);
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+
+    check_create_clamp(50, 100);
+    check_create_clamp(60000, 30000);
 
     /* create the tag */
     tag = create_tag();

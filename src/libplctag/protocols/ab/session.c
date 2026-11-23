@@ -78,8 +78,8 @@ static uint8_t cip_router_path[] = {0x20, 0x02, 0x24, 0x01};
 /* the largest connection the plain Forward Open can ask for. */
 #define CIP_FO_PLAIN_MAX_SIZE (504)
 
-/* Idle timeout.  One second less than that negotiated with the PLC. */
-#define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
+/* Idle timeout.  Two seconds less than that negotiated with the PLC, the same as Modbus. */
+#define SESSION_DISCONNECT_TIMEOUT (30000)
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 #define SESSION_IDLE_WAIT_TIME (100)
 
@@ -343,11 +343,14 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
     }
 
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT);
-    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
+    /* clamped to the same range plc_tag_set_int_attribute() clamps to.  A later release may fail instead. */
+    if(connection_inactivity_timeout_ms < 100 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
+        int32_t clamped = (connection_inactivity_timeout_ms < 100) ? 100 : SESSION_DISCONNECT_TIMEOUT;
+
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-               "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
-               connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT, SESSION_DISCONNECT_TIMEOUT);
-        connection_inactivity_timeout_ms = SESSION_DISCONNECT_TIMEOUT;
+               "connection_inactivity_timeout_ms %d must be between 100 and %d, clamped to %d.",
+               connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT, clamped);
+        connection_inactivity_timeout_ms = clamped;
     } else {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
                connection_inactivity_timeout_ms);

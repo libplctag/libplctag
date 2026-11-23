@@ -642,11 +642,14 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
     }
 
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", MODBUS_INACTIVITY_TIMEOUT);
-    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > MODBUS_INACTIVITY_TIMEOUT) {
+    /* clamped to the same range plc_tag_set_int_attribute() clamps to.  A later release may fail instead. */
+    if(connection_inactivity_timeout_ms < 100 || connection_inactivity_timeout_ms > MODBUS_INACTIVITY_TIMEOUT) {
+        int32_t clamped = (connection_inactivity_timeout_ms < 100) ? 100 : MODBUS_INACTIVITY_TIMEOUT;
+
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
-               "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
-               connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT, MODBUS_INACTIVITY_TIMEOUT);
-        connection_inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT;
+               "connection_inactivity_timeout_ms %d must be between 100 and %d, clamped to %d.",
+               connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT, clamped);
+        connection_inactivity_timeout_ms = clamped;
     } else {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
                connection_inactivity_timeout_ms);

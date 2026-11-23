@@ -65,7 +65,7 @@
  * How long the library may wait for a reply before giving up on the request.
  *
  * This is connection_inactivity_timeout_ms, which process_requests() uses as its request
- * deadline.  Left at its default of 31000ms, a reply lost across the outage parks the
+ * deadline.  Left at its default of 30000ms, a reply lost across the outage parks the
  * connection for just longer than SECOND_RUN_TIME, and the test ends while still waiting --
  * which is exactly how this test failed once.  Five seconds leaves the recovery six times
  * inside the window.

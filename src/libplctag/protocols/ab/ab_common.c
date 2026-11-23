@@ -1122,7 +1122,7 @@ static int32_t ab_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_
     int32_t clamped_value = value;
     int32_t rc = PLCTAG_STATUS_OK;
 
-    /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (31000ms) maximum */
+    /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (30000ms) maximum */
     if(clamped_value < 100) {
         clamped_value = 100;
         rc = PLCTAG_ERR_OUT_OF_BOUNDS;

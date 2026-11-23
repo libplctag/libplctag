@@ -45,7 +45,8 @@
 /* #define MAX_SESSION_HOST    (128) */
 
 #    define SESSION_DEFAULT_TIMEOUT (2000)
-#    define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
+/* idle timeout, as for Modbus: 2 s under the ~32 s the Forward Open asks for. */
+#    define SESSION_DISCONNECT_TIMEOUT (30000)
 
 #    define MAX_PACKET_SIZE_EX (44 + 4002)
 
