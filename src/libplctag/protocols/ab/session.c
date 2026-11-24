@@ -342,18 +342,6 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
     }
 
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT);
-    /* clamped to the same range plc_tag_set_int_attribute() clamps to.  A later release may fail instead. */
-    if(connection_inactivity_timeout_ms < 100 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
-        int32_t clamped = (connection_inactivity_timeout_ms < 100) ? 100 : SESSION_DISCONNECT_TIMEOUT;
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-               "connection_inactivity_timeout_ms %d must be between 100 and %d, clamped to %d.",
-               connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT, clamped);
-        connection_inactivity_timeout_ms = clamped;
-    } else {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
-               connection_inactivity_timeout_ms);
-    }
 
     critical_block(&session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
@@ -386,6 +374,22 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
+                /*
+                 * clamped to the same range plc_tag_set_int_attribute() clamps to.  A later release may fail instead.
+                 * Only here: a tag that joins an existing session does not set its timeout, so it gets no warning.
+                 */
+                if(connection_inactivity_timeout_ms < 100 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
+                    int32_t clamped = (connection_inactivity_timeout_ms < 100) ? 100 : SESSION_DISCONNECT_TIMEOUT;
+
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                           "connection_inactivity_timeout_ms %d must be between 100 and %d, clamped to %d.",
+                           connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT, clamped);
+                    connection_inactivity_timeout_ms = clamped;
+                } else {
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
+                           connection_inactivity_timeout_ms);
+                }
+
                 atomic_init_int32(&session->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
                 atomic_init_int32(&session->connection_retry_max_delay_ms, connection_retry_max_delay_ms);
 
