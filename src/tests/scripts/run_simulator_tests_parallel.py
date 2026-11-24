@@ -307,7 +307,7 @@ REQUIRED_EXECUTABLES = [
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
     "test_callback_destroy", "test_timeout_next", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops", "test_modbus_split_write",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
-    "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
+    "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr", "test_conn_settings",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
     "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown", "test_shutdown_drain", "test_ab_server_framing", "test_modbus_server_framing",
     "test_set_size_fixed", "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
@@ -747,6 +747,15 @@ def build_manifest() -> Manifest:
                f"--conn-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection"], T)
     sec.test("connection_retry_max_delay_ms read and clamped at create (AB ControlLogix)",
               [exe("test_retry_attr"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], F)
+    # Connection settings: the connection takes the latest value, from a creating or joining tag string or a set
+    # through any data or @connection tag.
+    sec.test("connection settings set at create, on join and at runtime (AB ControlLogix)",
+              [exe("test_conn_settings"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               f"--conn-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection"], F)
+    sec.test("a joining tag's idle timeout disconnects the connection (AB ControlLogix)",
+              [exe("test_conn_settings"), "--mode=idle-join",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"], T)
     sec.test("hard library shutdown",
               [exe("test_shutdown"),
                f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"], F)
@@ -846,7 +855,7 @@ def build_manifest() -> Manifest:
               [exe("test_cip_ops"), "--mode=set-size-busy", cip_ops_base], F, server=cip_ops_server(300))
     sec.test("an async read fills the read cache and hits do not restart its window",
               [exe("test_cip_ops"), "--mode=read-cache", cip_ops_base], F, server=cip_ops_server(0))
-    sec.test("create-from-tag API (19 permutation tests with AB/EIP)",
+    sec.test("create-from-tag API (20 permutation tests with AB/EIP)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
                "--clone-attrib=name=TestBigArray[1]&elem_count=1",
@@ -1281,6 +1290,14 @@ def build_manifest() -> Manifest:
                "--expect-err"], T, ports_needed=1)
     sec.test("Test async reconnect after PLC outage",
               [exe("test_reconnect_after_outage_async"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
+    # Nothing listens on the port, so the connection keeps retrying; the cap is set after the retries start.
+    sec.test("a retry cap set at runtime caps the reconnect waits (AB, no server running)",
+              [exe("test_conn_settings"), "--mode=retry-runtime",
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"],
+              T, ports_needed=1)
+    sec.test("a retry cap set at runtime caps the reconnect waits (Modbus, no server running)",
+              [exe("test_conn_settings"), "--mode=retry-runtime",
+               "--tag=protocol=modbus-tcp&gateway=127.0.0.1:{PORT}&path=0&elem_count=2&name=hr10"], T, ports_needed=1)
     sec.test("Test sync reconnect after PLC outage",
               [exe("test_reconnect_after_outage_sync"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
     # Nothing is due and nothing is in flight, so only the handler watching the socket while it
@@ -1504,6 +1521,10 @@ def build_manifest() -> Manifest:
               [exe("test_idle_disconnect"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], T)
     sec.test("connection_retry_max_delay_ms read and clamped at create (Omron)",
               [exe("test_retry_attr"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], F)
+    sec.test("connection settings set at create, on join and at runtime (Omron)",
+              [exe("test_conn_settings"),
+               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray",
+               f"--conn-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@connection"], F)
     sec.test("@connection tag connection state transitions (Omron)",
               [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&connection_inactivity_timeout_ms=5000&name=@connection"], T)
     sec.test("multiple simultaneous @connection tags on same session (Omron)",
@@ -1536,7 +1557,7 @@ def build_manifest() -> Manifest:
                "--num-tags=200", "--test-duration-secs=10"], S)
     sec.test("emulator test extended callbacks async (Omron)",
               [exe("test_callback_ex_async"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=10&name=TestDINTArray"], F)
-    sec.test("create-from-tag API (19 permutation tests with Omron)",
+    sec.test("create-from-tag API (20 permutation tests with Omron)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",
                "--clone-attrib=name=TestDINTArray[1]&elem_count=1",
@@ -1904,6 +1925,13 @@ def build_manifest() -> Manifest:
               [exe("test_idle_disconnect"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
     sec.test("connection_retry_max_delay_ms read and clamped at create (Modbus)",
               [exe("test_retry_attr"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
+    sec.test("connection settings set at create, on join and at runtime (Modbus)",
+              [exe("test_conn_settings"), "--max-requests",
+               f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
+               f"--conn-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection"], F)
+    sec.test("a joining tag's idle timeout disconnects the connection (Modbus)",
+              [exe("test_conn_settings"), "--mode=idle-join",
+               f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
     sec.test("thread stress Modbus",
               [exe("thread_stress"), "10", f"protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], S)
     sec.test("connection stress (multiple connections) Modbus",
@@ -1918,7 +1946,7 @@ def build_manifest() -> Manifest:
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",
                "--timeout=5000"], F)
-    sec.test("create-from-tag API (19 permutation tests with Modbus)",
+    sec.test("create-from-tag API (20 permutation tests with Modbus)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                "--clone-attrib=name=hr20&elem_count=2",
@@ -1972,6 +2000,26 @@ def build_manifest() -> Manifest:
                                               pattern=r"Requests in flight: new high of 1\.", expected=1))
     sec.test("check: the abort storm never had more than one request in flight", None, F, depends_on=limited.id,
               ports_needed=0, check=CheckSpec(log_file=limited.server_log_file, pattern=r"Over the limit", expected=0))
+    # max_requests_in_flight changed at runtime through an @connection tag.  The handler applies it between passes;
+    # the server counts what reaches it.
+    mb_settings = [f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
+                   f"--conn-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection"]
+    raised = sec.test("max_requests_in_flight raised from 1 to 4 at runtime (Modbus)",
+              [exe("test_conn_settings"), "--mode=raise-limit", *mb_settings], F,
+              server=mb_fault_server("--delay-ms=10", "--max-in-flight=4"))
+    sec.test("check: the raised limit put 4 requests in flight", None, F, depends_on=raised.id,
+              ports_needed=0, check=CheckSpec(log_file=raised.server_log_file,
+                                              pattern=r"Requests in flight: new high of 4\.", expected=1))
+    sec.test("check: the raised limit never went over 4", None, F, depends_on=raised.id,
+              ports_needed=0, check=CheckSpec(log_file=raised.server_log_file, pattern=r"Over the limit", expected=0))
+    lowered = sec.test("max_requests_in_flight lowered from 8 to 2 at runtime (Modbus)",
+              [exe("test_conn_settings"), "--mode=lower-limit", *mb_settings], F,
+              server=mb_fault_server("--delay-ms=10", "--max-in-flight=2"))
+    sec.test("check: the lowered limit put 2 requests in flight", None, F, depends_on=lowered.id,
+              ports_needed=0, check=CheckSpec(log_file=lowered.server_log_file,
+                                              pattern=r"Requests in flight: new high of 2\.", expected=1))
+    sec.test("check: the lowered limit never went over 2", None, F, depends_on=lowered.id,
+              ports_needed=0, check=CheckSpec(log_file=lowered.server_log_file, pattern=r"Over the limit", expected=0))
     # Known issues 7, 8 and 14, each against old code in test_modbus_ops.c's mode notes.
     sec.test("failed write build leaves nothing queued, so the idle connection stays down (Modbus)",
               [exe("test_modbus_ops"), "--mode=write-readonly", mb_ops_base], T, server=mb_fault_server())

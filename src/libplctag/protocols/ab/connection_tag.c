@@ -60,15 +60,31 @@ static int connection_tag_abort(plc_tag_p tag);
 static int connection_tag_status(plc_tag_p tag);
 static int connection_tag_tickler(plc_tag_p tag);
 static int32_t connection_get_connection_status(plc_tag_p tag, int32_t *result);
+static int32_t connection_get_inactivity_timeout_ms(plc_tag_p tag, int32_t *result);
+static int32_t connection_set_inactivity_timeout_ms(plc_tag_p tag, int32_t value);
+static int32_t connection_get_retry_max_delay_ms(plc_tag_p tag, int32_t *result);
+static int32_t connection_set_retry_max_delay_ms(plc_tag_p tag, int32_t value);
 static void ab_connection_tag_destructor(void *ptr);
 static const char *conn_status_name(int32_t conn_status);
 
-/* A connection tag carries no PLC data, so its only runtime attribute is the link state. */
+/* A connection tag carries no PLC data: its runtime attributes are the link state and the connection's settings. */
 static const attr_def_t connection_tag_attribs[] = {
     {.name = "connectionstatus",
      .type = ATTR_TYPE_INT,
      .description = "The state of the session this connection tag monitors, as a plc_tag_conn_status_t.",
      .get_int = connection_get_connection_status},
+
+    {.name = "connectioninactivitytimeoutms",
+     .type = ATTR_TYPE_INT,
+     .description = "Disconnect the session after this many milliseconds without traffic.",
+     .get_int = connection_get_inactivity_timeout_ms,
+     .set_int = connection_set_inactivity_timeout_ms},
+
+    {.name = "connectionretrymaxdelayms",
+     .type = ATTR_TYPE_INT,
+     .description = "The longest wait between reconnect attempts, in milliseconds.",
+     .get_int = connection_get_retry_max_delay_ms,
+     .set_int = connection_set_retry_max_delay_ms},
 
     {.name = NULL},
 };
@@ -247,6 +263,36 @@ static int32_t connection_get_connection_status(plc_tag_p tag, int32_t *result) 
     *result = (int32_t)conn_tag->last_conn_state;
 
     return PLCTAG_STATUS_OK;
+}
+
+/* no session means the session that will be created uses the default. */
+static int32_t connection_get_inactivity_timeout_ms(plc_tag_p tag, int32_t *result) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    *result = (conn_tag->session ? atomic_get_int32(&conn_tag->session->connection_inactivity_timeout_ms)
+                                 : (int32_t)SESSION_DISCONNECT_TIMEOUT);
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t connection_set_inactivity_timeout_ms(plc_tag_p tag, int32_t value) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    return session_set_inactivity_timeout_ms(conn_tag->session, tag->tag_id, value);
+}
+
+static int32_t connection_get_retry_max_delay_ms(plc_tag_p tag, int32_t *result) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    *result = (conn_tag->session ? atomic_get_int32(&conn_tag->session->connection_retry_max_delay_ms) : (int32_t)RETRY_WAIT_MAX_MS);
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t connection_set_retry_max_delay_ms(plc_tag_p tag, int32_t value) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    return session_set_retry_max_delay_ms(conn_tag->session, tag->tag_id, value);
 }
 
 static void ab_connection_tag_destructor(void *ptr) {

@@ -75,6 +75,7 @@
 #define SOCKET_CONNECT_TIMEOUT (20)    /* connect timeout step in milliseconds */
 #define MODBUS_IDLE_WAIT_TIMEOUT (100) /* idle wait timeout in milliseconds */
 #define MAX_MODBUS_REQUESTS (16)       /* per the Modbus specification */
+#define MB_DEFAULT_REQUESTS_IN_FLIGHT (1)
 
 typedef struct modbus_tag_t *modbus_tag_p;
 
@@ -135,7 +136,8 @@ struct modbus_plc_t {
         PLC_IDLE_WAIT,
         PLC_ERR_WAIT
     } state;
-    int max_requests_in_flight;
+    int max_requests_in_flight; /* handler thread only: copied from max_requests_in_flight_setting once per loop */
+    atomic_int32_t max_requests_in_flight_setting; /* any thread writes it; the handler applies it */
     atomic_int32_t pending_request_count;
 
     /* Timing statistics - queue time (request to send) and network time (send to response) */
@@ -327,6 +329,12 @@ static int mb_connection_tag_abort(plc_tag_p tag);
 static int mb_connection_tag_status(plc_tag_p tag);
 static int mb_connection_tag_tickler(plc_tag_p tag);
 static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *result);
+static int32_t mb_connection_get_inactivity_timeout_ms(plc_tag_p tag, int32_t *result);
+static int32_t mb_connection_set_inactivity_timeout_ms(plc_tag_p tag, int32_t value);
+static int32_t mb_connection_get_retry_max_delay_ms(plc_tag_p tag, int32_t *result);
+static int32_t mb_connection_set_retry_max_delay_ms(plc_tag_p tag, int32_t value);
+static int32_t mb_connection_get_max_requests_in_flight(plc_tag_p tag, int32_t *result);
+static int32_t mb_connection_set_max_requests_in_flight(plc_tag_p tag, int32_t value);
 static void mb_connection_tag_destructor(void *ptr);
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status);
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status);
@@ -339,6 +347,10 @@ static void modbus_tag_destructor(void *tag_arg);
 static void modbus_plc_destructor(void *plc_arg);
 static THREAD_FUNC(modbus_plc_handler);
 static void wake_plc_thread(modbus_plc_p plc);
+static int32_t mb_clamp(int32_t tag_id, const char *name, int32_t value, int32_t min_value, int32_t max_value, int32_t *result);
+static int32_t mb_plc_set_inactivity_timeout_ms(modbus_plc_p plc, int32_t tag_id, int32_t value);
+static int32_t mb_plc_set_retry_max_delay_ms(modbus_plc_p plc, int32_t tag_id, int32_t value);
+static int32_t mb_plc_set_max_requests_in_flight(modbus_plc_p plc, int32_t tag_id, int32_t value);
 static int connect_plc(modbus_plc_p plc);
 static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms);
 static int tickle_tag(modbus_plc_p plc, modbus_tag_p tag, int64_t now, int64_t *min_wait_time);
@@ -619,48 +631,10 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
     const char *server = attr_get_str(attribs, "gateway", NULL);
     int server_id = attr_get_int(attribs, "path", -1);
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
-    int max_requests_in_flight = attr_get_int(attribs, "max_requests_in_flight", 1);
-    int connection_inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT;
-    int connection_retry_max_delay_ms = attr_get_int(attribs, "connection_retry_max_delay_ms", RETRY_WAIT_MAX_MS);
     int is_new = 0;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
-
-    /* clamp maximum requests in flight. */
-    if(max_requests_in_flight > MAX_MODBUS_REQUESTS) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
-               "max_requests_in_flight set to %d which is higher than the Modbus limit of %d.", max_requests_in_flight,
-               MAX_MODBUS_REQUESTS);
-        max_requests_in_flight = MAX_MODBUS_REQUESTS;
-    }
-
-    if(max_requests_in_flight < 1) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "max_requests_in_flight must be between 1 and %d, inclusive, was %d.",
-               MAX_MODBUS_REQUESTS, max_requests_in_flight);
-        max_requests_in_flight = 1;
-    }
-
-    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", MODBUS_INACTIVITY_TIMEOUT);
-    /* clamped to the same range plc_tag_set_int_attribute() clamps to.  A later release may fail instead. */
-    if(connection_inactivity_timeout_ms < 100 || connection_inactivity_timeout_ms > MODBUS_INACTIVITY_TIMEOUT) {
-        int32_t clamped = (connection_inactivity_timeout_ms < 100) ? 100 : MODBUS_INACTIVITY_TIMEOUT;
-
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
-               "connection_inactivity_timeout_ms %d must be between 100 and %d, clamped to %d.",
-               connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT, clamped);
-        connection_inactivity_timeout_ms = clamped;
-    } else {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
-               connection_inactivity_timeout_ms);
-    }
-
-    if(connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS || connection_retry_max_delay_ms > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "connection_retry_max_delay_ms %d must be between %d and %d, clamping.",
-               connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS);
-        connection_retry_max_delay_ms = (connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS) ? CONN_RETRY_MAX_DELAY_MIN_MS
-                                                                                                    : CONN_RETRY_MAX_DELAY_LIMIT_MS;
-    }
 
     if(server_id < 0 || server_id > 255) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Server ID, %d, out of bounds or missing!", server_id);
@@ -755,13 +729,14 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
                 }
 
                 if(rc == PLCTAG_STATUS_OK) {
-                    /* set up the maximum request depth. */
-                    (*plc)->max_requests_in_flight = max_requests_in_flight;
+                    /* the defaults; a value in the tag string is applied below, as for a joining tag. */
+                    (*plc)->max_requests_in_flight = MB_DEFAULT_REQUESTS_IN_FLIGHT;
+                    atomic_init_int32(&(*plc)->max_requests_in_flight_setting, MB_DEFAULT_REQUESTS_IN_FLIGHT);
 
                     /* Initialize PLC state before making it visible to other threads */
                     (*plc)->state = PLC_CONNECT_START;
-                    atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
-                    atomic_init_int32(&(*plc)->connection_retry_max_delay_ms, connection_retry_max_delay_ms);
+                    atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT);
+                    atomic_init_int32(&(*plc)->connection_retry_max_delay_ms, RETRY_WAIT_MAX_MS);
                     atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
                     /* conn_event_ring_write_idx always points at the ring slot holding the
@@ -814,6 +789,27 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
             } else {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Created thread %p.", (void *)(*plc)->handler_thread);
             }
+        }
+    }
+
+    /*
+     * The PLC takes the latest value it is given, from the tag that creates it or one that joins it.  Only a value in
+     * the tag string counts: a tag without one must not reset the PLC to the default.  Out of range is clamped with a
+     * warning; create does not fail on it (#689).
+     */
+    if(rc == PLCTAG_STATUS_OK && *plc) {
+        if(attr_get_str(attribs, "connection_inactivity_timeout_ms", NULL)) {
+            mb_plc_set_inactivity_timeout_ms(*plc, 0,
+                                             attr_get_int(attribs, "connection_inactivity_timeout_ms", MODBUS_INACTIVITY_TIMEOUT));
+        }
+
+        if(attr_get_str(attribs, "connection_retry_max_delay_ms", NULL)) {
+            mb_plc_set_retry_max_delay_ms(*plc, 0, attr_get_int(attribs, "connection_retry_max_delay_ms", RETRY_WAIT_MAX_MS));
+        }
+
+        if(attr_get_str(attribs, "max_requests_in_flight", NULL)) {
+            mb_plc_set_max_requests_in_flight(*plc, 0,
+                                              attr_get_int(attribs, "max_requests_in_flight", MB_DEFAULT_REQUESTS_IN_FLIGHT));
         }
     }
 
@@ -1071,6 +1067,13 @@ THREAD_FUNC(modbus_plc_handler) {
     while(!atomic_get_bool(&plc->flags.terminate) && atomic_get_bool(&lib_active)) {
         int64_t wait_time_ms = MODBUS_IDLE_WAIT_TIMEOUT;
         int64_t tickle_start_us, tickle_end_us;
+
+        /*
+         * The safe point for max_requests_in_flight: between passes, so one pass sees one limit.  Every use is a
+         * "pending < max" gate on a new send, so a lower limit sends nothing new until the requests in flight
+         * finish below it, and a higher one sends more at once.  Nothing is sized by it.
+         */
+        plc->max_requests_in_flight = atomic_get_int32(&plc->max_requests_in_flight_setting);
 
         tickle_start_us = time_us();
         rc = tickle_all_tags(plc, &wait_time_ms);
@@ -3864,32 +3867,83 @@ static int32_t mb_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *
 }
 
 
-static int32_t mb_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
-    modbus_tag_p tag = (modbus_tag_p)raw_tag;
-    int32_t clamped_value = value;
-    int32_t rc = PLCTAG_STATUS_OK;
+/*
+ * Set a connection value, clamped to its range.  Any tag on the connection, data or @connection, can do this at any
+ * time, at create or later; the newest value wins.  Returns PLCTAG_ERR_OUT_OF_BOUNDS, with a warning, when clamped.
+ */
+static int32_t mb_clamp(int32_t tag_id, const char *name, int32_t value, int32_t min_value, int32_t max_value, int32_t *result) {
+    *result = value;
 
-    /* Clamp to valid range: 100ms minimum, MODBUS_INACTIVITY_TIMEOUT (30000ms) maximum */
-    if(clamped_value < 100) {
-        clamped_value = 100;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", (int)value);
-    } else if(clamped_value > MODBUS_INACTIVITY_TIMEOUT) {
-        clamped_value = MODBUS_INACTIVITY_TIMEOUT;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, MODBUS_INACTIVITY_TIMEOUT);
-    }
+    if(value >= min_value && value <= max_value) { return PLCTAG_STATUS_OK; }
 
-    if(!tag->plc) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Cannot set connection_inactivity_timeout_ms: no PLC exists.");
-        return PLCTAG_ERR_NOT_FOUND;
-    }
+    *result = (value < min_value) ? min_value : max_value;
 
-    atomic_set_int32(&tag->plc->connection_inactivity_timeout_ms, clamped_value);
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag_id, "%s %" PRId32 " must be between %" PRId32 " and %" PRId32 ", clamped to %" PRId32 ".",
+           name, value, min_value, max_value, *result);
+
+    return PLCTAG_ERR_OUT_OF_BOUNDS;
+}
+
+
+static int32_t mb_plc_set_inactivity_timeout_ms(modbus_plc_p plc, int32_t tag_id, int32_t value) {
+    int32_t clamped = 0;
+    int32_t rc = mb_clamp(tag_id, "connection_inactivity_timeout_ms", value, 100, MODBUS_INACTIVITY_TIMEOUT, &clamped);
+
+    if(!plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    /* the handler sees the change against cached_inactivity_timeout_ms and moves the deadline. */
+    atomic_set_int32(&plc->connection_inactivity_timeout_ms, clamped);
 
     return rc;
+}
+
+
+static int32_t mb_plc_set_retry_max_delay_ms(modbus_plc_p plc, int32_t tag_id, int32_t value) {
+    int32_t clamped = 0;
+    int32_t rc = mb_clamp(tag_id, "connection_retry_max_delay_ms", value, CONN_RETRY_MAX_DELAY_MIN_MS,
+                          CONN_RETRY_MAX_DELAY_LIMIT_MS, &clamped);
+
+    if(!plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    /* the handler reads the cap on every retry, so a wait already scheduled keeps its length. */
+    atomic_set_int32(&plc->connection_retry_max_delay_ms, clamped);
+
+    return rc;
+}
+
+
+static int32_t mb_plc_set_max_requests_in_flight(modbus_plc_p plc, int32_t tag_id, int32_t value) {
+    int32_t clamped = 0;
+    int32_t rc = mb_clamp(tag_id, "max_requests_in_flight", value, 1, MAX_MODBUS_REQUESTS, &clamped);
+
+    if(!plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    /* staged: the handler applies it between passes.  Wake it so a higher limit is used now. */
+    atomic_set_int32(&plc->max_requests_in_flight_setting, clamped);
+    wake_plc_thread(plc);
+
+    return rc;
+}
+
+
+static int32_t mb_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    return mb_plc_set_inactivity_timeout_ms(tag->plc, tag->tag_id, value);
+}
+
+
+static int32_t mb_set_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t value) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    return mb_plc_set_retry_max_delay_ms(tag->plc, tag->tag_id, value);
+}
+
+
+static int32_t mb_set_max_requests_in_flight(plc_tag_p raw_tag, int32_t value) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    return mb_plc_set_max_requests_in_flight(tag->plc, tag->tag_id, value);
 }
 
 
@@ -3930,7 +3984,8 @@ static int32_t mb_get_max_requests_in_flight(plc_tag_p raw_tag, int32_t *result)
 
     if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
 
-    *result = (int32_t)tag->plc->max_requests_in_flight;
+    /* the value set, which the handler may not have applied yet. */
+    *result = atomic_get_int32(&tag->plc->max_requests_in_flight_setting);
 
     return PLCTAG_STATUS_OK;
 }
@@ -3960,8 +4015,9 @@ static const attr_def_t mb_attribs[] = {
 
     {.name = "connectionretrymaxdelayms",
      .type = ATTR_TYPE_INT,
-     .description = "The longest wait between reconnect attempts, in milliseconds.  Set only at create.",
-     .get_int = mb_get_connection_retry_max_delay_ms},
+     .description = "The longest wait between reconnect attempts, in milliseconds.",
+     .get_int = mb_get_connection_retry_max_delay_ms,
+     .set_int = mb_set_connection_retry_max_delay_ms},
 
     {.name = "gateway",
      .type = ATTR_TYPE_STRING,
@@ -3977,7 +4033,8 @@ static const attr_def_t mb_attribs[] = {
     {.name = "maxrequestsinflight",
      .type = ATTR_TYPE_INT,
      .description = "How many requests this tag's PLC will have outstanding at once.",
-     .get_int = mb_get_max_requests_in_flight},
+     .get_int = mb_get_max_requests_in_flight,
+     .set_int = mb_set_max_requests_in_flight},
 
     {.name = NULL},
 };
@@ -4089,12 +4146,30 @@ static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
     return PLCTAG_STATUS_OK;
 }
 
-/* A Modbus connection tag carries no PLC data, so its only runtime attribute is the link state. */
+/* A Modbus connection tag carries no PLC data: its runtime attributes are the link state and the PLC's settings. */
 static const attr_def_t mb_connection_tag_attribs[] = {
     {.name = "connectionstatus",
      .type = ATTR_TYPE_INT,
      .description = "The state of the connection this connection tag monitors, as a plc_tag_conn_status_t.",
      .get_int = mb_connection_get_connection_status},
+
+    {.name = "connectioninactivitytimeoutms",
+     .type = ATTR_TYPE_INT,
+     .description = "Disconnect from the PLC after this many milliseconds without traffic.",
+     .get_int = mb_connection_get_inactivity_timeout_ms,
+     .set_int = mb_connection_set_inactivity_timeout_ms},
+
+    {.name = "connectionretrymaxdelayms",
+     .type = ATTR_TYPE_INT,
+     .description = "The longest wait between reconnect attempts, in milliseconds.",
+     .get_int = mb_connection_get_retry_max_delay_ms,
+     .set_int = mb_connection_set_retry_max_delay_ms},
+
+    {.name = "maxrequestsinflight",
+     .type = ATTR_TYPE_INT,
+     .description = "How many requests the PLC will have outstanding at once.",
+     .get_int = mb_connection_get_max_requests_in_flight,
+     .set_int = mb_connection_set_max_requests_in_flight},
 
     {.name = NULL},
 };
@@ -4116,6 +4191,49 @@ static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *resul
     *result = (int32_t)dt->last_conn_state;
 
     return PLCTAG_STATUS_OK;
+}
+
+/* no PLC means the PLC that will be created uses the default. */
+static int32_t mb_connection_get_inactivity_timeout_ms(plc_tag_p tag, int32_t *result) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
+
+    *result = (dt->plc ? atomic_get_int32(&dt->plc->connection_inactivity_timeout_ms) : (int32_t)MODBUS_INACTIVITY_TIMEOUT);
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t mb_connection_set_inactivity_timeout_ms(plc_tag_p tag, int32_t value) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
+
+    return mb_plc_set_inactivity_timeout_ms(dt->plc, tag->tag_id, value);
+}
+
+static int32_t mb_connection_get_retry_max_delay_ms(plc_tag_p tag, int32_t *result) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
+
+    *result = (dt->plc ? atomic_get_int32(&dt->plc->connection_retry_max_delay_ms) : (int32_t)RETRY_WAIT_MAX_MS);
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t mb_connection_set_retry_max_delay_ms(plc_tag_p tag, int32_t value) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
+
+    return mb_plc_set_retry_max_delay_ms(dt->plc, tag->tag_id, value);
+}
+
+static int32_t mb_connection_get_max_requests_in_flight(plc_tag_p tag, int32_t *result) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
+
+    *result = (dt->plc ? atomic_get_int32(&dt->plc->max_requests_in_flight_setting) : (int32_t)MB_DEFAULT_REQUESTS_IN_FLIGHT);
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t mb_connection_set_max_requests_in_flight(plc_tag_p tag, int32_t value) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
+
+    return mb_plc_set_max_requests_in_flight(dt->plc, tag->tag_id, value);
 }
 
 static void mb_connection_tag_destructor(void *ptr) {

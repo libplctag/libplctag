@@ -41,7 +41,7 @@
  * What a capped delay does to the reconnect timing is checked in the simulator suite against
  * a PLC that refuses every connection.  This checks the attribute plumbing itself: that an
  * out-of-range value in the tag string is clamped, and that the getter answers before there
- * is a connection to answer for.  There is no runtime setter.
+ * is a connection to answer for.  The runtime setter and joining tags are covered by test_conn_settings.
  */
 
 #include "compat_utils.h"
@@ -100,7 +100,7 @@ static void fail(int32_t tag, const char *what, int expected, int actual) {
 
 /*
  * Create a tag asking for delay_ms in its tag string and check the connection ended up with
- * want_ms.  group_id puts it on a connection of its own so the value is not ignored.
+ * want_ms.  group_id puts it on a connection of its own, so no other tag's value is mixed in.
  */
 static int check_create_time_clamp(int delay_ms, int want_ms, int group_id) {
     char tag_str[512];

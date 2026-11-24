@@ -262,6 +262,10 @@ uint16_t session_get_new_seq_id(cip_conn_p sess);
 extern int session_startup(void);
 
 extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new_session);
+
+/* clamp, set on the shared connection, and return PLCTAG_ERR_OUT_OF_BOUNDS if clamped; any tag, any time. */
+extern int32_t session_set_inactivity_timeout_ms(cip_conn_p session, int32_t tag_id, int32_t value);
+extern int32_t session_set_retry_max_delay_ms(cip_conn_p session, int32_t tag_id, int32_t value);
 /* true when an identified connection is connected and the tag asks for unconnected, or the reverse. */
 extern bool session_connected_conflicts(cip_conn_p session, int use_connected_msg);
 /* true when the connection is identified and connected.  An unidentified one is unconnected for now. */

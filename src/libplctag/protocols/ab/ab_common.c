@@ -1129,30 +1129,15 @@ static int32_t ab_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *
 
 static int32_t ab_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
     ab_tag_p tag = (ab_tag_p)raw_tag;
-    int32_t clamped_value = value;
-    int32_t rc = PLCTAG_STATUS_OK;
 
-    /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (30000ms) maximum */
-    if(clamped_value < 100) {
-        clamped_value = 100;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", (int)value);
-    } else if(clamped_value > SESSION_DISCONNECT_TIMEOUT) {
-        clamped_value = SESSION_DISCONNECT_TIMEOUT;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, SESSION_DISCONNECT_TIMEOUT);
-    }
+    return session_set_inactivity_timeout_ms(tag->session, tag->tag_id, value);
+}
 
-    if(!tag->session) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Cannot set connection_inactivity_timeout_ms: no session exists.");
-        return PLCTAG_ERR_NOT_FOUND;
-    }
 
-    atomic_set_int32(&tag->session->connection_inactivity_timeout_ms, clamped_value);
+static int32_t ab_set_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t value) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
 
-    return rc;
+    return session_set_retry_max_delay_ms(tag->session, tag->tag_id, value);
 }
 
 
@@ -1357,8 +1342,9 @@ const attr_def_t ab_attribs[] = {
 
     {.name = "connectionretrymaxdelayms",
      .type = ATTR_TYPE_INT,
-     .description = "The longest wait between reconnect attempts, in milliseconds.  Set only at create.",
-     .get_int = ab_get_connection_retry_max_delay_ms},
+     .description = "The longest wait between reconnect attempts, in milliseconds.",
+     .get_int = ab_get_connection_retry_max_delay_ms,
+     .set_int = ab_set_connection_retry_max_delay_ms},
 
     {.name = "rawtagtypebytes",
      .type = ATTR_TYPE_BYTES,

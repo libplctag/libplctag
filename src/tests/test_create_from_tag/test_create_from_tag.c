@@ -58,6 +58,7 @@
  *      callback; a data tag after it is connected and reads
  *  19. use_connected_msg=0 on a connected connection    -> ERR_BAD_PARAM, by create and by clone
  *      (only with --logix, the one family that lets a tag choose)
+ *  20. a clone takes its source's data encoding; its own attribute string overrides it
  *
  * Usage:
  *   test_create_from_tag [--src-tag=ATTRIBS] [--clone-attrib=ATTRIBS]
@@ -864,6 +865,97 @@ static int test_use_connected_msg_conflict(void) {
     return rc;
 }
 
+/*
+ * The data encoding attributes describe the device's raw data, so they are set only at create.  A clone takes its
+ * source's values; one it names itself wins.  A clone of a source that set none keeps the PLC's defaults.
+ */
+static int get_int16_order(int32_t tag, char *buf, int size) {
+    int len = plc_tag_get_byte_array_attribute(tag, "int16_byte_order", (uint8_t *)buf, size - 1);
+
+    if(len < 0) { return len; }
+    buf[len] = '\0';
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int check_encoding(int32_t tag, const char *what, int want_capacity, const char *want_int16) {
+    char order[16];
+    int capacity = plc_tag_get_int_attribute(tag, "str_max_capacity", -1);
+    int rc = get_int16_order(tag, order, (int)sizeof(order));
+
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  ERROR: %s: cannot read int16_byte_order: %s\n", what, plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    if(capacity != want_capacity || strcmp(order, want_int16) != 0) {
+        fprintf(stderr, "  ERROR: %s: str_max_capacity=%d int16_byte_order=%s, expected %d and %s\n", what, capacity, order,
+                want_capacity, want_int16);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int test_clone_inherits_encoding(void) {
+    char src_str[1024];
+    char clone_str[1024];
+    char default_order[16];
+    const char *src_order = NULL;  /* as the getter reports it */
+    const char *src_order_attr = NULL; /* as the tag string gives it */
+    int default_capacity = 0;
+    int32_t plain = 0, src = 0, clone = 0;
+    int rc = PLCTAG_STATUS_OK;
+
+    /* the defaults, from a plain tag; the source then sets values that differ from them. */
+    if((plain = create_ready_src_tag()) < 0) { return (int)plain; }
+    default_capacity = plc_tag_get_int_attribute(plain, "str_max_capacity", -1);
+    if((rc = get_int16_order(plain, default_order, (int)sizeof(default_order))) != PLCTAG_STATUS_OK) {
+        plc_tag_destroy(plain);
+        return rc;
+    }
+    src_order = (strcmp(default_order, "1,0") == 0) ? "0,1" : "1,0";
+    src_order_attr = (strcmp(default_order, "1,0") == 0) ? "01" : "10";
+
+    snprintf(src_str, sizeof(src_str), "%s&str_max_capacity=40&int16_byte_order=%s", src_tag_attribs, src_order_attr);
+    src = plc_tag_create(src_str, timeout_ms);
+    if(src < 0 || (rc = wait_for_tag_ready(src, timeout_ms)) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  ERROR: could not create the source with its own encoding: %s\n",
+                plc_tag_decode_error(src < 0 ? (int)src : rc));
+        plc_tag_destroy(plain);
+        if(src > 0) { plc_tag_destroy(src); }
+        return src < 0 ? (int)src : rc;
+    }
+
+    do {
+        /* the clone takes the source's values. */
+        clone = plc_tag_create_from_tag(src, clone_tag_attribs, NULL, NULL, timeout_ms);
+        if(clone < 0) { rc = (int)clone; break; }
+        rc = check_encoding(clone, "clone of the source", 40, src_order);
+        plc_tag_destroy(clone);
+        if(rc != PLCTAG_STATUS_OK) { break; }
+
+        /* a value the clone names itself wins; the rest still come from the source. */
+        snprintf(clone_str, sizeof(clone_str), "%s&str_max_capacity=30", clone_tag_attribs);
+        clone = plc_tag_create_from_tag(src, clone_str, NULL, NULL, timeout_ms);
+        if(clone < 0) { rc = (int)clone; break; }
+        rc = check_encoding(clone, "clone with its own str_max_capacity", 30, src_order);
+        plc_tag_destroy(clone);
+        if(rc != PLCTAG_STATUS_OK) { break; }
+
+        /* a source that set nothing passes on the defaults. */
+        clone = plc_tag_create_from_tag(plain, clone_tag_attribs, NULL, NULL, timeout_ms);
+        if(clone < 0) { rc = (int)clone; break; }
+        rc = check_encoding(clone, "clone of a plain source", default_capacity, default_order);
+        plc_tag_destroy(clone);
+    } while(0);
+
+    plc_tag_destroy(src);
+    plc_tag_destroy(plain);
+
+    return rc;
+}
+
 /* -------------------------------------------------------------------------
  * Main
  * ---------------------------------------------------------------------- */
@@ -930,6 +1022,7 @@ int main(int argc, char **argv) {
         RUN_TEST("17. async create (timeout=0) + poll -> success", test_async_create_and_poll());
         RUN_TEST("18. @connection first: connected, status UP without callback", test_connection_tag_first());
         RUN_TEST("19. use_connected_msg: own connection; clone conflict -> ERR_BAD_PARAM", test_use_connected_msg_conflict());
+        RUN_TEST("20. clone takes the source's data encoding; its own values win", test_clone_inherits_encoding());
     }
 
     fprintf(stderr, "\nRESULT: %d/%d passed", passed, total);

@@ -132,6 +132,7 @@ static void auto_destroy_tag(lib_instance_p inst, plc_tag_p tag);
 static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
 static int plc_tag_abort_impl(plc_tag_p tag);
+static int inherit_byte_order(plc_tag_p tag, plc_tag_p src_tag);
 static int set_tag_byte_order(plc_tag_p tag, attr attribs);
 static int check_byte_order_str(const char *byte_order, int length, int32_t tag_id);
 static int32_t check_string_access_unsafe(plc_tag_p tag);
@@ -1362,6 +1363,14 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     /* See if we are allowed to resize fields */
     tag->allow_field_resize = (uint8_t)(attr_get_int(attribs, "allow_field_resize", 0) ? 1 : 0);
+
+    /* a clone starts with its source's data encoding; its own tag string overrides any of it below. */
+    if(src_tag && (rc = inherit_byte_order(tag, src_tag)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Unable to copy the source tag's byte order: %s!", plc_tag_decode_error(rc));
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return rc;
+    }
 
     /* set up the tag byte order if there are any overrides. */
     rc = set_tag_byte_order(tag, attribs);
@@ -4560,6 +4569,32 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
 /*****************************************************************************************************
  *****************************  Support routines for extra indirection *******************************
  ****************************************************************************************************/
+
+/*
+ * plc_tag_create_from_tag(): the new tag takes the source's data encoding (byte orders, string layout, write padding).
+ * Only a source with overrides of its own has anything to pass on; otherwise the new tag keeps the default its
+ * constructor chose for the same PLC.  The source's encoding is fixed at its create, so reading it here is safe.
+ */
+static int inherit_byte_order(plc_tag_p tag, plc_tag_p src_tag) {
+    if(!tag->byte_order || !src_tag->byte_order || !src_tag->byte_order->is_allocated) { return PLCTAG_STATUS_OK; }
+
+    if(!tag->byte_order->is_allocated) {
+        tag_byte_order_t *new_byte_order = mem_alloc((int)(unsigned int)sizeof(*(tag->byte_order)));
+
+        if(!new_byte_order) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to allocate byte order struct for tag!");
+            return PLCTAG_ERR_NO_MEM;
+        }
+
+        tag->byte_order = new_byte_order;
+    }
+
+    *(tag->byte_order) = *(src_tag->byte_order);
+    tag->byte_order->is_allocated = 1;
+
+    return PLCTAG_STATUS_OK;
+}
+
 
 int set_tag_byte_order(plc_tag_p tag, attr attribs)
 

@@ -198,6 +198,8 @@ static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc
 static void identify_step(cip_conn_p session, struct session_sm_s *sm);
 static void connected_step(cip_conn_p session, struct session_sm_s *sm);
 static void unconnected_step(cip_conn_p session, struct session_sm_s *sm);
+static int32_t session_clamp(int32_t tag_id, const char *name, int32_t value, int32_t min_value, int32_t max_value,
+                             int32_t *result);
 static uint32_t next_connection_id(void);
 
 
@@ -310,6 +312,51 @@ int session_get_available_cip_payload_space(cip_conn_p session) {
     return result;
 }
 
+/*
+ * Set a connection value, clamped to its range.  Any tag on the connection can do this at any time, at create or
+ * later; the newest value wins.  Returns PLCTAG_ERR_OUT_OF_BOUNDS, with a warning, when the value was clamped.
+ */
+static int32_t session_clamp(int32_t tag_id, const char *name, int32_t value, int32_t min_value, int32_t max_value,
+                             int32_t *result) {
+    *result = value;
+
+    if(value >= min_value && value <= max_value) { return PLCTAG_STATUS_OK; }
+
+    *result = (value < min_value) ? min_value : max_value;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, tag_id, "%s %" PRId32 " must be between %" PRId32 " and %" PRId32 ", clamped to %" PRId32 ".",
+           name, value, min_value, max_value, *result);
+
+    return PLCTAG_ERR_OUT_OF_BOUNDS;
+}
+
+
+extern int32_t session_set_inactivity_timeout_ms(cip_conn_p session, int32_t tag_id, int32_t value) {
+    int32_t clamped = 0;
+    int32_t rc = session_clamp(tag_id, "connection_inactivity_timeout_ms", value, 100, SESSION_DISCONNECT_TIMEOUT, &clamped);
+
+    if(!session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    atomic_set_int32(&session->connection_inactivity_timeout_ms, clamped);
+
+    return rc;
+}
+
+
+extern int32_t session_set_retry_max_delay_ms(cip_conn_p session, int32_t tag_id, int32_t value) {
+    int32_t clamped = 0;
+    int32_t rc = session_clamp(tag_id, "connection_retry_max_delay_ms", value, CONN_RETRY_MAX_DELAY_MIN_MS,
+                               CONN_RETRY_MAX_DELAY_LIMIT_MS, &clamped);
+
+    if(!session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    /* the handler reads the cap on every retry, so a wait already scheduled keeps its length. */
+    atomic_set_int32(&session->connection_retry_max_delay_ms, clamped);
+
+    return rc;
+}
+
+
 int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_session) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
@@ -321,16 +368,7 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
     int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
-    int connection_inactivity_timeout_ms = SESSION_DISCONNECT_TIMEOUT;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
-    int connection_retry_max_delay_ms = attr_get_int(attribs, "connection_retry_max_delay_ms", RETRY_WAIT_MAX_MS);
-
-    if(connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS || connection_retry_max_delay_ms > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "connection_retry_max_delay_ms %d must be between %d and %d, clamping.",
-               connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS);
-        connection_retry_max_delay_ms = (connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS) ? CONN_RETRY_MAX_DELAY_MIN_MS
-                                                                                                    : CONN_RETRY_MAX_DELAY_LIMIT_MS;
-    }
     int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
@@ -340,8 +378,6 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                "The attribute \"share_session\" is deprecated and will be removed.  Use \"connection_group_id\" instead.");
     }
-
-    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT);
 
     critical_block(&session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
@@ -374,24 +410,9 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
-                /*
-                 * clamped to the same range plc_tag_set_int_attribute() clamps to.  A later release may fail instead.
-                 * Only here: a tag that joins an existing session does not set its timeout, so it gets no warning.
-                 */
-                if(connection_inactivity_timeout_ms < 100 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
-                    int32_t clamped = (connection_inactivity_timeout_ms < 100) ? 100 : SESSION_DISCONNECT_TIMEOUT;
-
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                           "connection_inactivity_timeout_ms %d must be between 100 and %d, clamped to %d.",
-                           connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT, clamped);
-                    connection_inactivity_timeout_ms = clamped;
-                } else {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
-                           connection_inactivity_timeout_ms);
-                }
-
-                atomic_init_int32(&session->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
-                atomic_init_int32(&session->connection_retry_max_delay_ms, connection_retry_max_delay_ms);
+                /* the defaults; a value in the tag string is applied below, as for a joining tag. */
+                atomic_init_int32(&session->connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT);
+                atomic_init_int32(&session->connection_retry_max_delay_ms, RETRY_WAIT_MAX_MS);
 
                 /* see if we have an attribute set for forcing the use of the older ForwardOpen */
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
@@ -404,6 +425,23 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
             }
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Reusing existing session.");
+        }
+
+        /*
+         * The connection takes the latest value it is given, from the tag that creates it or one that joins it.
+         * Only a value in the tag string counts: a tag without one must not reset the connection to the default.
+         * Out of range is clamped with a warning; create does not fail on it (#689).
+         */
+        if(session != CIP_CONN_NULL) {
+            if(attr_get_str(attribs, "connection_inactivity_timeout_ms", NULL)) {
+                session_set_inactivity_timeout_ms(
+                    session, 0, attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT));
+            }
+
+            if(attr_get_str(attribs, "connection_retry_max_delay_ms", NULL)) {
+                session_set_retry_max_delay_ms(session, 0,
+                                               attr_get_int(attribs, "connection_retry_max_delay_ms", RETRY_WAIT_MAX_MS));
+            }
         }
     }
 
