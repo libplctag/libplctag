@@ -45,6 +45,8 @@
 /* #define MAX_SESSION_HOST    (128) */
 
 #    define SESSION_DEFAULT_TIMEOUT (2000)
+/* the default ceiling of the reconnect wait, the connection_retry_max_delay_ms attribute. */
+#    define RETRY_WAIT_MAX_MS (10000)
 /* idle timeout, as for Modbus: 2 s under the ~32 s the Forward Open asks for. */
 #    define SESSION_DISCONNECT_TIMEOUT (30000)
 

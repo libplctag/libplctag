@@ -32,21 +32,20 @@
  ***************************************************************************/
 
 /*
- * connection_retry_max_delay_ms, read and written live through the public attribute API.
+ * connection_retry_max_delay_ms, set in the tag string and read live through the public attribute API.
  *
  * The attribute is per-connection state reached through whichever tag the caller happens to
  * hold, and every protocol wires it up separately, so the same script runs against AB, Omron
  * and Modbus.  Taking a --tag= argument is what makes that possible.
  *
  * What a capped delay does to the reconnect timing is checked in the simulator suite against
- * a PLC that refuses every connection.  This checks the attribute plumbing itself: that the
- * value survives a round trip, that an out-of-range value is refused rather than stored, and
- * that the getter answers before there is a connection to answer for.
+ * a PLC that refuses every connection.  This checks the attribute plumbing itself: that an
+ * out-of-range value in the tag string is clamped, and that the getter answers before there
+ * is a connection to answer for.  There is no runtime setter.
  */
 
 #include "compat_utils.h"
 #include <libplctag/lib/libplctag.h>
-#include <libplctag/lib/conn_timeouts.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,10 +55,11 @@
 
 #define DATA_TIMEOUT_MS (5000)
 
-/* comfortably inside the bounds and not equal to any protocol's default. */
-#define TEST_DELAY_MS (4321)
-
 #define GET_FAILED (-1)
+
+/* the bounds of the attribute, as in session.c and modbus.c. */
+#define CONN_RETRY_MAX_DELAY_MIN_MS (100)
+#define CONN_RETRY_MAX_DELAY_LIMIT_MS (300000)
 
 
 static const char *tag_string = NULL;
@@ -201,55 +201,8 @@ int main(int argc, char **argv) {
         fail(tag, "Connected " ATTR_NAME " differs from the pre-connection default", default_delay_ms, delay_ms);
     }
 
-    /* Test 1: a valid value survives the round trip. */
-    // NOLINTNEXTLINE
-    fprintf(stderr, "\n=== Test 1: set %s to %d ms ===\n", ATTR_NAME, TEST_DELAY_MS);
-
-    rc = plc_tag_set_int_attribute(tag, ATTR_NAME, TEST_DELAY_MS);
-    if(rc != PLCTAG_STATUS_OK) { fail(tag, "Setting a valid " ATTR_NAME " failed", PLCTAG_STATUS_OK, rc); }
-
-    delay_ms = plc_tag_get_int_attribute(tag, ATTR_NAME, GET_FAILED);
-    if(delay_ms != TEST_DELAY_MS) { fail(tag, ATTR_NAME " did not keep the value it was set to", TEST_DELAY_MS, delay_ms); }
-
-    // NOLINTNEXTLINE
-    fprintf(stderr, "Read back %d ms.\n", delay_ms);
-
-    /* Test 2: below the floor is clamped and reported, not stored. */
-    // NOLINTNEXTLINE
-    fprintf(stderr, "\n=== Test 2: set %s below the floor ===\n", ATTR_NAME);
-
-    rc = plc_tag_set_int_attribute(tag, ATTR_NAME, 1);
-    if(rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
-        fail(tag, "Setting " ATTR_NAME " below the floor was not reported", PLCTAG_ERR_OUT_OF_BOUNDS, rc);
-    }
-
-    delay_ms = plc_tag_get_int_attribute(tag, ATTR_NAME, GET_FAILED);
-    if(delay_ms != CONN_RETRY_MAX_DELAY_MIN_MS) {
-        fail(tag, ATTR_NAME " was not clamped up to the floor", CONN_RETRY_MAX_DELAY_MIN_MS, delay_ms);
-    }
-
-    // NOLINTNEXTLINE
-    fprintf(stderr, "Clamped to %d ms and reported out of bounds.\n", delay_ms);
-
-    /* Test 3: above the ceiling, likewise. */
-    // NOLINTNEXTLINE
-    fprintf(stderr, "\n=== Test 3: set %s above the ceiling ===\n", ATTR_NAME);
-
-    rc = plc_tag_set_int_attribute(tag, ATTR_NAME, CONN_RETRY_MAX_DELAY_LIMIT_MS + 1);
-    if(rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
-        fail(tag, "Setting " ATTR_NAME " above the ceiling was not reported", PLCTAG_ERR_OUT_OF_BOUNDS, rc);
-    }
-
-    delay_ms = plc_tag_get_int_attribute(tag, ATTR_NAME, GET_FAILED);
-    if(delay_ms != CONN_RETRY_MAX_DELAY_LIMIT_MS) {
-        fail(tag, ATTR_NAME " was not clamped down to the ceiling", CONN_RETRY_MAX_DELAY_LIMIT_MS, delay_ms);
-    }
-
-    // NOLINTNEXTLINE
-    fprintf(stderr, "Clamped to %d ms and reported out of bounds.\n", delay_ms);
-
     /*
-     * Test 4: the same clamping when the value arrives in the tag string.
+     * Test 1: an out-of-range value in the tag string is clamped.
      *
      * The value only reaches a connection that does not exist yet, so each of these needs a
      * connection of its own -- reusing this test's would silently ignore it, which is the
@@ -257,7 +210,7 @@ int main(int argc, char **argv) {
      * forces a separate one.
      */
     // NOLINTNEXTLINE
-    fprintf(stderr, "\n=== Test 4: out-of-range values in the tag string ===\n");
+    fprintf(stderr, "\n=== Test 1: out-of-range values in the tag string ===\n");
 
     if(!check_create_time_clamp(1, CONN_RETRY_MAX_DELAY_MIN_MS, 1)) {
         plc_tag_destroy(tag);
@@ -269,17 +222,17 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    /* Test 5: the connection still works after all that, and the value is still the last one set. */
+    /* Test 2: the connection still works, and its value is still the default. */
     // NOLINTNEXTLINE
-    fprintf(stderr, "\n=== Test 5: the connection still works ===\n");
+    fprintf(stderr, "\n=== Test 2: the connection still works ===\n");
 
     if((rc = plc_tag_read(tag, DATA_TIMEOUT_MS)) != PLCTAG_STATUS_OK) {
         fail(tag, "Read after changing " ATTR_NAME " failed", PLCTAG_STATUS_OK, rc);
     }
 
     delay_ms = plc_tag_get_int_attribute(tag, ATTR_NAME, GET_FAILED);
-    if(delay_ms != CONN_RETRY_MAX_DELAY_LIMIT_MS) {
-        fail(tag, ATTR_NAME " changed on its own across a read", CONN_RETRY_MAX_DELAY_LIMIT_MS, delay_ms);
+    if(delay_ms != default_delay_ms) {
+        fail(tag, ATTR_NAME " changed on its own across a read", default_delay_ms, delay_ms);
     }
 
     // NOLINTNEXTLINE

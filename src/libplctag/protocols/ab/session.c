@@ -66,7 +66,6 @@ static uint8_t cip_router_path[] = {0x20, 0x02, 0x24, 0x01};
  * after a failure.
  */
 #define RETRY_WAIT_INITIAL_MS (100)
-#define RETRY_WAIT_MAX_MS (10000)
 
 /* the bounds of the connection_retry_max_delay_ms attribute. */
 #define CONN_RETRY_MAX_DELAY_MIN_MS (100)

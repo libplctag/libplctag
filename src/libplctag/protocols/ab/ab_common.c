@@ -1117,6 +1117,16 @@ static int32_t ab_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_
 }
 
 
+static int32_t ab_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *result) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    /* no session means the session that will be created uses the default. */
+    *result = (tag->session ? atomic_get_int32(&tag->session->connection_retry_max_delay_ms) : (int32_t)RETRY_WAIT_MAX_MS);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 static int32_t ab_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
     ab_tag_p tag = (ab_tag_p)raw_tag;
     int32_t clamped_value = value;
@@ -1344,6 +1354,11 @@ const attr_def_t ab_attribs[] = {
      .description = "Disconnect the session after this many milliseconds without traffic.",
      .get_int = ab_get_connection_inactivity_timeout_ms,
      .set_int = ab_set_connection_inactivity_timeout_ms},
+
+    {.name = "connection_retry_max_delay_ms",
+     .type = ATTR_TYPE_INT,
+     .description = "The longest wait between reconnect attempts, in milliseconds.  Set only at create.",
+     .get_int = ab_get_connection_retry_max_delay_ms},
 
     {.name = "raw_tag_type_bytes",
      .type = ATTR_TYPE_BYTES,

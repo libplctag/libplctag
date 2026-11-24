@@ -3854,6 +3854,16 @@ static int32_t mb_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_
 }
 
 
+static int32_t mb_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *result) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    /* no PLC means the PLC that will be created uses the default. */
+    *result = (tag->plc ? atomic_get_int32(&tag->plc->connection_retry_max_delay_ms) : (int32_t)RETRY_WAIT_MAX_MS);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 static int32_t mb_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
     int32_t clamped_value = value;
@@ -3947,6 +3957,11 @@ static const attr_def_t mb_attribs[] = {
      .description = "Disconnect from the PLC after this many milliseconds without traffic.",
      .get_int = mb_get_connection_inactivity_timeout_ms,
      .set_int = mb_set_connection_inactivity_timeout_ms},
+
+    {.name = "connection_retry_max_delay_ms",
+     .type = ATTR_TYPE_INT,
+     .description = "The longest wait between reconnect attempts, in milliseconds.  Set only at create.",
+     .get_int = mb_get_connection_retry_max_delay_ms},
 
     {.name = "gateway",
      .type = ATTR_TYPE_STRING,
