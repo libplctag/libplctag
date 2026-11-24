@@ -1234,7 +1234,19 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     }
 
     if(reuse == 1) {
-        critical_block(&inst->tag_lookup_mutex) { existing = find_reusable_unsafe(inst, attrib_str); }
+        /* the key has canonical names, so strings that differ only in how names are spelled share a tag. */
+        char *reuse_key = attr_canonical_str(attrib_str);
+
+        if(!reuse_key) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to allocate the find_or_create_tag key!");
+            attr_destroy(attribs);
+            rc_dec(inst);
+            return PLCTAG_ERR_NO_MEM;
+        }
+
+        critical_block(&inst->tag_lookup_mutex) { existing = find_reusable_unsafe(inst, reuse_key); }
+
+        mem_free(reuse_key);
 
         if(existing) {
             attr_destroy(attribs);
@@ -1373,7 +1385,15 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     rc_inc(tag);
 
     /* map the tag to a tag ID */
-    id = add_tag_lookup(tag, (reuse == 1 ? attrib_str : NULL), &existing);
+    if(reuse == 1) {
+        char *reuse_key = attr_canonical_str(attrib_str);
+
+        id = (reuse_key ? add_tag_lookup(tag, reuse_key, &existing) : PLCTAG_ERR_NO_MEM);
+
+        mem_free(reuse_key);
+    } else {
+        id = add_tag_lookup(tag, NULL, &existing);
+    }
 
     /* if the mapping failed, then punt */
     if(id < 0) {

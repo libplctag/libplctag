@@ -38,6 +38,7 @@
  *      Author: Kyle Hayes
  */
 
+#include <libplctag/lib/libplctag.h>
 #include <platform.h>
 #include <stdio.h>
 #include <string.h>
@@ -57,6 +58,7 @@ struct attr_t {
 
 
 static attr_entry find_entry(attr a, const char *name);
+static bool canonical_char(char c, char *out);
 
 
 /*
@@ -68,20 +70,98 @@ static attr_entry find_entry(attr a, const char *name);
 
 static attr_entry find_entry(attr a, const char *name) {
     attr_entry e;
+    char canonical[ATTR_NAME_MAX_SIZE];
 
     if(!a) { return NULL; }
+
+    /* a name too long to canonicalize here is longer than any attribute the library knows. */
+    if(attr_canonical_name(canonical, (int32_t)sizeof(canonical), name) < 0) { return NULL; }
 
     e = a->head;
 
     if(!e) { return NULL; }
 
     while(e) {
-        if(str_cmp_i(e->name, name) == 0) { return e; }
+        if(str_cmp(e->name, canonical) == 0) { return e; }
 
         e = e->next;
     }
 
     return NULL;
+}
+
+
+/* false for a byte the canonical form drops. */
+static bool canonical_char(char c, char *out) {
+    if(c == '_') { return false; }
+
+    *out = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+
+    return true;
+}
+
+
+extern int32_t attr_canonical_name(char *dst, int32_t dst_size, const char *name) {
+    int32_t len = 0;
+
+    if(!dst || !name) { return PLCTAG_ERR_NULL_PTR; }
+
+    if(dst_size < 1) { return PLCTAG_ERR_TOO_SMALL; }
+
+    for(int32_t i = 0; name[i]; i++) {
+        char c = 0;
+
+        if(!canonical_char(name[i], &c)) { continue; }
+
+        if(len + 1 >= dst_size) { return PLCTAG_ERR_TOO_SMALL; }
+
+        dst[len++] = c;
+    }
+
+    dst[len] = (char)0;
+
+    return len;
+}
+
+
+extern char *attr_canonical_str(const char *attr_str) {
+    char *res = NULL;
+    int32_t r = 0;
+    int32_t w = 0;
+
+    if(!attr_str) { return NULL; }
+
+    /* never longer than the input. */
+    res = (char *)mem_alloc(str_length(attr_str) + 1);
+    if(!res) { return NULL; }
+
+    while(attr_str[r]) {
+        int32_t key_start = r;
+        int32_t key_end = r;
+
+        /* the name runs to '=', or to '&' or the end in a pair without one. */
+        while(attr_str[key_end] && attr_str[key_end] != '=' && attr_str[key_end] != '&') { key_end++; }
+
+        r = key_end;
+
+        while(key_start < key_end && attr_str[key_start] == ' ') { key_start++; }
+        while(key_end > key_start && attr_str[key_end - 1] == ' ') { key_end--; }
+
+        for(int32_t i = key_start; i < key_end; i++) {
+            char c = 0;
+
+            if(canonical_char(attr_str[i], &c)) { res[w++] = c; }
+        }
+
+        /* the '=' and the value, unchanged, then the '&' if there is one. */
+        while(attr_str[r] && attr_str[r] != '&') { res[w++] = attr_str[r++]; }
+
+        if(attr_str[r] == '&') { res[w++] = attr_str[r++]; }
+    }
+
+    res[w] = (char)0;
+
+    return res;
 }
 
 
@@ -258,6 +338,9 @@ extern int attr_set_str(attr attrs, const char *name, const char *val) {
                 mem_free(e);
                 return 1;
             }
+
+            /* in place: the canonical name is never longer. */
+            attr_canonical_name(e->name, str_length(e->name) + 1, e->name);
 
             e->val = str_dup(val);
 

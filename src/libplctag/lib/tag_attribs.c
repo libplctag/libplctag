@@ -39,6 +39,7 @@
 #include <libplctag/lib/version.h>
 #include <platform.h>
 #include <stdint.h>
+#include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/time_utils.h>
 
@@ -98,127 +99,127 @@ static const attr_def_t core_attribs[] = {
      .description = "The size of the tag data buffer in bytes.",
      .get_int = core_get_size},
 
-    {.name = "read_cache_ms",
+    {.name = "readcachems",
      .type = ATTR_TYPE_INT,
      .description = "Reuse the result of a read for this many milliseconds before going to the PLC again.",
      .get_int = core_get_read_cache_ms,
      .set_int = core_set_read_cache_ms},
 
-    {.name = "auto_sync_read_ms",
+    {.name = "autosyncreadms",
      .type = ATTR_TYPE_INT,
      .description = "Automatically read the tag every this many milliseconds.  Zero disables automatic reads.",
      .get_int = core_get_auto_sync_read_ms,
      .set_int = core_set_auto_sync_read_ms},
 
-    {.name = "auto_sync_write_ms",
+    {.name = "autosyncwritems",
      .type = ATTR_TYPE_INT,
      .description = "Wait this many milliseconds after a write to the tag data, then write the tag to the PLC.",
      .get_int = core_get_auto_sync_write_ms,
      .set_int = core_set_auto_sync_write_ms},
 
-    {.name = "destroy_tag_after_idle_sec",
+    {.name = "destroytagafteridlesec",
      .type = ATTR_TYPE_INT,
      .description = "Destroy the tag after this many seconds with no read or write.  Zero disables it, the minimum is 10.",
      .get_int = core_get_destroy_tag_after_idle_sec,
      .set_int = core_set_destroy_tag_after_idle_sec},
 
-    {.name = "bit_num",
+    {.name = "bitnum",
      .type = ATTR_TYPE_INT,
      .description = "The bit within the PLC tag that this tag maps, for a tag created with a bit number.",
      .get_int = core_get_bit_num},
 
-    {.name = "connection_group_id",
+    {.name = "connectiongroupid",
      .type = ATTR_TYPE_INT,
      .description = "The group this tag's session or connection belongs to.  Set when the tag is created.",
      .get_int = core_get_connection_group_id},
 
-    {.name = "allow_field_resize",
+    {.name = "allowfieldresize",
      .type = ATTR_TYPE_INT,
      .description = "Allow the tag data buffer to be resized when the PLC reports a different size.",
      .get_int = core_get_allow_field_resize,
      .set_int = core_set_allow_field_resize},
 
-    {.name = "find_or_create_tag",
+    {.name = "findorcreatetag",
      .type = ATTR_TYPE_INT,
      .description = "A create with exactly the same tag string returns this tag.  Set when the tag is created.",
      .get_int = core_get_find_or_create_tag},
 
     /* String and byte order layout.  Read-only after creation; they live on tag->byte_order. */
-    {.name = "str_is_counted",
+    {.name = "striscounted",
      .type = ATTR_TYPE_INT,
      .description = "The string data starts with a count word.",
      .get_int = core_get_str_is_counted},
 
-    {.name = "str_is_fixed_length",
+    {.name = "strisfixedlength",
      .type = ATTR_TYPE_INT,
      .description = "The string data occupies a fixed number of bytes.",
      .get_int = core_get_str_is_fixed_length},
 
-    {.name = "str_is_zero_terminated",
+    {.name = "striszeroterminated",
      .type = ATTR_TYPE_INT,
      .description = "The string data ends with a zero byte.",
      .get_int = core_get_str_is_zero_terminated},
 
-    {.name = "str_is_byte_swapped",
+    {.name = "strisbyteswapped",
      .type = ATTR_TYPE_INT,
      .description = "The string characters are swapped in pairs.",
      .get_int = core_get_str_is_byte_swapped},
 
-    {.name = "str_count_word_bytes",
+    {.name = "strcountwordbytes",
      .type = ATTR_TYPE_INT,
      .description = "The size in bytes of the string's count word.",
      .get_int = core_get_str_count_word_bytes},
 
-    {.name = "str_max_capacity",
+    {.name = "strmaxcapacity",
      .type = ATTR_TYPE_INT,
      .description = "The most characters the string can hold.",
      .get_int = core_get_str_max_capacity},
 
-    {.name = "str_total_length",
+    {.name = "strtotallength",
      .type = ATTR_TYPE_INT,
      .description = "The total size in bytes a string occupies, including its count word and padding.",
      .get_int = core_get_str_total_length},
 
-    {.name = "str_pad_bytes",
+    {.name = "strpadbytes",
      .type = ATTR_TYPE_INT,
      .description = "The number of padding bytes after the string data.",
      .get_int = core_get_str_pad_bytes},
 
-    {.name = "str_pad_to_multiple_bytes",
+    {.name = "strpadtomultiplebytes",
      .type = ATTR_TYPE_INT,
      .description = "Pad the string data out to a multiple of this many bytes.",
      .get_int = core_get_str_pad_to_multiple_bytes},
 
-    {.name = "write_pad_alignment_bytes",
+    {.name = "writepadalignmentbytes",
      .type = ATTR_TYPE_INT,
      .description = "Pad written data out to a multiple of this many bytes: 1, 2 or 4.",
      .get_int = core_get_str_pad_to_multiple_bytes},
 
-    {.name = "int16_byte_order",
+    {.name = "int16byteorder",
      .type = ATTR_TYPE_STRING,
      .description = "The byte order of a 16-bit integer, as the comma-separated list the tag string uses.",
      .get_bytes = core_get_int16_byte_order,
      .get_bytes_size = core_get_int16_byte_order_size},
 
-    {.name = "int32_byte_order",
+    {.name = "int32byteorder",
      .type = ATTR_TYPE_STRING,
      .description = "The byte order of a 32-bit integer, as the comma-separated list the tag string uses.",
      .get_bytes = core_get_int32_byte_order,
      .get_bytes_size = core_get_int32_byte_order_size},
 
-    {.name = "int64_byte_order",
+    {.name = "int64byteorder",
      .type = ATTR_TYPE_STRING,
      .description = "The byte order of a 64-bit integer, as the comma-separated list the tag string uses.",
      .get_bytes = core_get_int64_byte_order,
      .get_bytes_size = core_get_int64_byte_order_size},
 
-    {.name = "float32_byte_order",
+    {.name = "float32byteorder",
      .type = ATTR_TYPE_STRING,
      .description = "The byte order of a 32-bit float, as the comma-separated list the tag string uses.",
      .get_bytes = core_get_float32_byte_order,
      .get_bytes_size = core_get_float32_byte_order_size},
 
-    {.name = "float64_byte_order",
+    {.name = "float64byteorder",
      .type = ATTR_TYPE_STRING,
      .description = "The byte order of a 64-bit float, as the comma-separated list the tag string uses.",
      .get_bytes = core_get_float64_byte_order,
@@ -231,17 +232,17 @@ static const attr_def_t core_attribs[] = {
 /* Attributes of the library itself, reached with a tag id of zero.  These accessors are
  * passed a NULL tag and must not touch it. */
 static const attr_def_t lib_attribs[] = {
-    {.name = "version_major",
+    {.name = "versionmajor",
      .type = ATTR_TYPE_INT,
      .description = "The major part of the library version.",
      .get_int = lib_get_version_major},
 
-    {.name = "version_minor",
+    {.name = "versionminor",
      .type = ATTR_TYPE_INT,
      .description = "The minor part of the library version.",
      .get_int = lib_get_version_minor},
 
-    {.name = "version_patch",
+    {.name = "versionpatch",
      .type = ATTR_TYPE_INT,
      .description = "The patch part of the library version.",
      .get_int = lib_get_version_patch},
@@ -253,7 +254,7 @@ static const attr_def_t lib_attribs[] = {
      .set_int = lib_set_debug},
 
     /* Deprecated spelling of "debug".  A separate entry so that it can carry its own warning. */
-    {.name = "debug_level",
+    {.name = "debuglevel",
      .type = ATTR_TYPE_INT,
      .description = "Deprecated, use \"debug\". The library-wide logging level.",
      .get_int = lib_get_debug_level,
@@ -264,30 +265,37 @@ static const attr_def_t lib_attribs[] = {
 
 
 const attr_def_t *attr_find_lib(const char *name) {
-    if(!name) { return NULL; }
+    char canonical[ATTR_NAME_MAX_SIZE];
 
-    return attr_table_find(lib_attribs, name);
+    if(attr_canonical_name(canonical, (int32_t)sizeof(canonical), name) < 0) { return NULL; }
+
+    return attr_table_find(lib_attribs, canonical);
 }
 
 
 const attr_def_t *attr_find(plc_tag_p tag, const char *name) {
     const attr_def_t *def = NULL;
+    char canonical[ATTR_NAME_MAX_SIZE];
 
-    if(!tag || !name) { return NULL; }
+    if(!tag) { return NULL; }
 
-    if(tag->vtable) { def = attr_table_find(tag->vtable->attribs, name); }
+    /* a name too long to canonicalize here is longer than any name in the tables. */
+    if(attr_canonical_name(canonical, (int32_t)sizeof(canonical), name) < 0) { return NULL; }
 
-    if(!def) { def = attr_table_find(core_attribs, name); }
+    if(tag->vtable) { def = attr_table_find(tag->vtable->attribs, canonical); }
+
+    if(!def) { def = attr_table_find(core_attribs, canonical); }
 
     return def;
 }
 
 
+/* name is canonical, and so is every name in the tables. */
 static const attr_def_t *attr_table_find(const attr_def_t *table, const char *name) {
     if(!table) { return NULL; }
 
     for(size_t index = 0; table[index].name; index++) {
-        if(str_cmp_i(table[index].name, name) == 0) { return &table[index]; }
+        if(str_cmp(table[index].name, name) == 0) { return &table[index]; }
     }
 
     return NULL;

@@ -65,7 +65,7 @@ static const char *conn_status_name(int32_t conn_status);
 
 /* A connection tag carries no PLC data, so its only runtime attribute is the link state. */
 static const attr_def_t connection_tag_attribs[] = {
-    {.name = "connection_status",
+    {.name = "connectionstatus",
      .type = ATTR_TYPE_INT,
      .description = "The state of the session this connection tag monitors, as a plc_tag_conn_status_t.",
      .get_int = connection_get_connection_status},

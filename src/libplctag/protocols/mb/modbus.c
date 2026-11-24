@@ -3937,28 +3937,28 @@ static int32_t mb_get_max_requests_in_flight(plc_tag_p raw_tag, int32_t *result)
 
 
 static const attr_def_t mb_attribs[] = {
-    {.name = "elem_size",
+    {.name = "elemsize",
      .type = ATTR_TYPE_INT,
      .description = "The size in bytes of a single element of this tag.",
      .get_int = mb_get_elem_size},
 
-    {.name = "elem_count",
+    {.name = "elemcount",
      .type = ATTR_TYPE_INT,
      .description = "The number of elements this tag holds.",
      .get_int = mb_get_elem_count},
 
-    {.name = "connection_status",
+    {.name = "connectionstatus",
      .type = ATTR_TYPE_INT,
      .description = "The state of the connection this tag uses, as a plc_tag_conn_status_t.",
      .get_int = mb_get_connection_status},
 
-    {.name = "connection_inactivity_timeout_ms",
+    {.name = "connectioninactivitytimeoutms",
      .type = ATTR_TYPE_INT,
      .description = "Disconnect from the PLC after this many milliseconds without traffic.",
      .get_int = mb_get_connection_inactivity_timeout_ms,
      .set_int = mb_set_connection_inactivity_timeout_ms},
 
-    {.name = "connection_retry_max_delay_ms",
+    {.name = "connectionretrymaxdelayms",
      .type = ATTR_TYPE_INT,
      .description = "The longest wait between reconnect attempts, in milliseconds.  Set only at create.",
      .get_int = mb_get_connection_retry_max_delay_ms},
@@ -3974,7 +3974,7 @@ static const attr_def_t mb_attribs[] = {
      .description = "The unit id of the Modbus server this tag uses.",
      .get_int = mb_get_path},
 
-    {.name = "max_requests_in_flight",
+    {.name = "maxrequestsinflight",
      .type = ATTR_TYPE_INT,
      .description = "How many requests this tag's PLC will have outstanding at once.",
      .get_int = mb_get_max_requests_in_flight},
@@ -4091,7 +4091,7 @@ static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
 
 /* A Modbus connection tag carries no PLC data, so its only runtime attribute is the link state. */
 static const attr_def_t mb_connection_tag_attribs[] = {
-    {.name = "connection_status",
+    {.name = "connectionstatus",
      .type = ATTR_TYPE_INT,
      .description = "The state of the connection this connection tag monitors, as a plc_tag_conn_status_t.",
      .get_int = mb_connection_get_connection_status},

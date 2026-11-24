@@ -1329,38 +1329,38 @@ static int32_t ab_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t 
 
 
 const attr_def_t ab_attribs[] = {
-    {.name = "elem_size",
+    {.name = "elemsize",
      .type = ATTR_TYPE_INT,
      .description = "The size in bytes of a single element of this tag.",
      .get_int = ab_get_elem_size},
 
-    {.name = "elem_count",
+    {.name = "elemcount",
      .type = ATTR_TYPE_INT,
      .description = "The number of elements this tag holds.",
      .get_int = ab_get_elem_count},
 
-    {.name = "elem_type",
+    {.name = "elemtype",
      .type = ATTR_TYPE_INT,
      .description = "The PLC's type code for a single element of this tag.",
      .get_int = ab_get_elem_type},
 
-    {.name = "connection_status",
+    {.name = "connectionstatus",
      .type = ATTR_TYPE_INT,
      .description = "The state of the session or connection this tag uses, as a plc_tag_conn_status_t.",
      .get_int = ab_get_connection_status},
 
-    {.name = "connection_inactivity_timeout_ms",
+    {.name = "connectioninactivitytimeoutms",
      .type = ATTR_TYPE_INT,
      .description = "Disconnect the session after this many milliseconds without traffic.",
      .get_int = ab_get_connection_inactivity_timeout_ms,
      .set_int = ab_set_connection_inactivity_timeout_ms},
 
-    {.name = "connection_retry_max_delay_ms",
+    {.name = "connectionretrymaxdelayms",
      .type = ATTR_TYPE_INT,
      .description = "The longest wait between reconnect attempts, in milliseconds.  Set only at create.",
      .get_int = ab_get_connection_retry_max_delay_ms},
 
-    {.name = "raw_tag_type_bytes",
+    {.name = "rawtagtypebytes",
      .type = ATTR_TYPE_BYTES,
      .description = "The encoded CIP type information for this tag.",
      .get_bytes = ab_get_raw_tag_type_bytes,
@@ -1368,7 +1368,7 @@ const attr_def_t ab_attribs[] = {
 
     /* Deprecated: it predates plc_tag_get_attribute_size().  No new byte array gets a length
      * attribute of its own. */
-    {.name = "raw_tag_type_bytes.length",
+    {.name = "rawtagtypebytes.length",
      .type = ATTR_TYPE_INT,
      .description = "Deprecated, use plc_tag_get_attribute_size(). The size of raw_tag_type_bytes in bytes.",
      .get_int = ab_get_raw_tag_type_bytes_length},
@@ -1381,12 +1381,12 @@ const attr_def_t ab_attribs[] = {
      .get_bytes = ab_get_plc,
      .get_bytes_size = ab_get_plc_size},
 
-    {.name = "use_connected_msg",
+    {.name = "useconnectedmsg",
      .type = ATTR_TYPE_INT,
      .description = "This tag uses CIP connected messaging.",
      .get_int = ab_get_use_connected_msg},
 
-    {.name = "allow_packing",
+    {.name = "allowpacking",
      .type = ATTR_TYPE_INT,
      .description = "This tag's requests may be packed with others into one CIP request.",
      .get_int = ab_get_allow_packing},
@@ -1397,7 +1397,7 @@ const attr_def_t ab_attribs[] = {
      .get_bytes = ab_get_gateway,
      .get_bytes_size = ab_get_gateway_size},
 
-    {.name = "gateway_port",
+    {.name = "gatewayport",
      .type = ATTR_TYPE_INT,
      .description = "The TCP port this tag's session connects to.",
      .get_int = ab_get_gateway_port},
@@ -1408,7 +1408,7 @@ const attr_def_t ab_attribs[] = {
      .get_bytes = ab_get_path,
      .get_bytes_size = ab_get_path_size},
 
-    {.name = "conn_only_use_old_forward_open",
+    {.name = "connonlyuseoldforwardopen",
      .type = ATTR_TYPE_INT,
      .description = "This tag's session uses the original Forward Open only, never the large one.",
      .get_int = ab_get_conn_only_use_old_forward_open},

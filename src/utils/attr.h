@@ -51,17 +51,26 @@ extern void attr_destroy(attr attrs);
 /* A deep copy, for a holder that has to outlive the set it was given.  NULL on failure. */
 extern attr attr_copy(attr src);
 
+/* the largest attribute name, terminator included, that a lookup canonicalizes on the stack. */
+#define ATTR_NAME_MAX_SIZE (64)
+
 /*
- * Bring an attribute value inside its range.
+ * The canonical form of an attribute name: ASCII 'A'-'Z' lowercased and '_' removed, every
+ * other byte unchanged.  Names are stored and looked up in this form, so "elem_count",
+ * "ElemCount" and "ELEM_COUNT" are one name and comparisons are exact.
  *
- * The value is passed by pointer and the result says whether it had to move, because every
- * caller that clamps a value the application supplied also has to say something about it --
- * log a warning, return PLCTAG_ERR_OUT_OF_BOUNDS, or both.  Returning the clamped value
- * instead would make each of those callers compare it against what they passed in.
+ * Byte-wise on purpose: no locale and no UTF-8 decoding, so no non-ASCII byte sequence (an
+ * overlong UTF-8 form, a Unicode case fold) can turn into an ASCII name.  The result is never
+ * longer than the input, so dst may be name.
  *
- * This serves values from a tag string and values from plc_tag_set_int_attribute() alike,
- * so it takes the value rather than the attribute set it may or may not have come from.
- *
- * A min_value above max_value is a caller error: the value ends up at max_value, so a bad
- * range shows up as a clamped value rather than letting anything through.
+ * Returns the length, PLCTAG_ERR_NULL_PTR, or PLCTAG_ERR_TOO_SMALL if dst_size cannot hold
+ * the result and its terminator.
  */
+extern int32_t attr_canonical_name(char *dst, int32_t dst_size, const char *name);
+
+/*
+ * A copy of attr_str with each name trimmed of spaces as attr_create_from_str() trims it and
+ * made canonical, and each value unchanged, in the original order.  The find_or_create_tag
+ * key.  NULL on failure; the caller frees it with mem_free().
+ */
+extern char *attr_canonical_str(const char *attr_str);
