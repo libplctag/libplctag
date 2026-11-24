@@ -76,7 +76,7 @@ static attr_entry find_entry(attr a, const char *name) {
     if(!e) { return NULL; }
 
     while(e) {
-        if(str_cmp(e->name, name) == 0) { return e; }
+        if(str_cmp_i(e->name, name) == 0) { return e; }
 
         e = e->next;
     }

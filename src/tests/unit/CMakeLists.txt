@@ -160,6 +160,18 @@ target_include_directories(test_tag_id_wrap PRIVATE
 
 target_link_libraries(test_tag_id_wrap PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_attr_case: attribute names in tag strings match without regard to case.
+add_executable(test_attr_case test_attr_case.c)
+
+target_include_directories(test_attr_case PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_attr_case PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_backoff: tests the shared connection retry backoff. Pure computation -- no socket,
 # no PLC, no threads -- so it runs anywhere and in milliseconds. It is also the UB check
 # for the retry path: the sanitizer build traps a bad shift inside backoff_wait_ms().
@@ -382,6 +394,7 @@ add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
 add_test(NAME unit_test_pccc_address COMMAND test_pccc_address)
 add_test(NAME unit_test_tag_id_wrap COMMAND test_tag_id_wrap)
+add_test(NAME unit_test_attr_case COMMAND test_attr_case)
 add_test(NAME unit_test_bounded_copy COMMAND test_bounded_copy)
 add_test(NAME unit_test_conn_path_fc COMMAND test_conn_path_fc)
 add_test(NAME unit_test_cip_build_leak COMMAND test_cip_build_leak)
