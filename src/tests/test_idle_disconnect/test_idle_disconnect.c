@@ -125,15 +125,18 @@ static void read_tag(int32_t tag) {
 
 /*
  * An out-of-range timeout in the tag string is clamped to 100-30000ms, the same as a set (#689).
- * The value only counts for the tag that creates the connection, so this uses its own group.
+ * The value only counts for the tag that creates the connection, so each probe uses its own group:
+ * a destroyed probe's connection can still be there when the next probe is created.
  */
 static void check_create_clamp(int32_t requested_ms, int32_t expected_ms) {
+    static int32_t group_id = 99; /* a new connection per probe; a joining tag's value is ignored */
     char probe_path[1024];
     int32_t probe = 0;
     int32_t value = 0;
 
-    compat_snprintf(probe_path, sizeof(probe_path), "%s&connection_group_id=99&connection_inactivity_timeout_ms=%" PRId32,
-                    tag_path, requested_ms);
+    compat_snprintf(probe_path, sizeof(probe_path),
+                    "%s&connection_group_id=%" PRId32 "&connection_inactivity_timeout_ms=%" PRId32, tag_path, group_id++,
+                    requested_ms);
 
     probe = plc_tag_create(probe_path, DATA_TIMEOUT);
     if(probe < 0) {
