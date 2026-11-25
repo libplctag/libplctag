@@ -50,7 +50,7 @@
 - #677: sockets were inheritable by child processes (Windows `WSA_FLAG_NO_HANDLE_INHERIT`, POSIX `SOCK_CLOEXEC`/`FD_CLOEXEC`), so a destroyed tag's connection stayed open while a child ran.
 - #679: the reconnect retry counter overflowed and was not reset after a good connection, giving near-zero retry waits.
 - #680: on POSIX, `select()` with a socket at or above `FD_SETSIZE` crashed or corrupted memory; now `poll()`, with `EINTR` retried.
-- #681, #691: `plc_tag_create()` failed with `PLCTAG_ERR_NO_RESOURCES` after the tag ID counter wrapped onto long-lived tags; the highest ID could not be destroyed; `@connection` did not set up connected messaging and its status was not updated.
+- #681: `plc_tag_create()` failed with `PLCTAG_ERR_NO_RESOURCES` after the tag ID counter wrapped onto long-lived tags; the highest ID could not be destroyed; `@connection` status was not updated.
 - #682: ab_server PCCC replies did not echo the request's requestor ID.
 - #683: `read_cache_ms` was never filled by async reads, and every cache hit restarted the window so the PLC was never read again.
 - #684: a `plc_tag_create_ex()` callback could run after create returned an error.
@@ -59,6 +59,7 @@
 - #688: PCCC named fields (`T4:0.ACC`, `C5:0.DN`, `R6:0.LEN` ...) failed with `PLCTAG_ERR_BAD_PARAM`.
 - #689: `connection_inactivity_timeout_ms` range and clamping clarified; the setting was silently ignored on a tag joining a shared connection.
 - #690: `@identity` failed with CIP status 0x04 when it shared a session with connected ControlLogix tags.
+- #691: a session created by an `@connection` tag did not use connected messaging, so tags created after it timed out.  A comment in #681 reported this earlier.
 - #692: the static library marked the `plc_tag_*` functions for export, so a DLL or shared library linking it re-exported them; on Windows it also defined `DllMain`, which could conflict with the `DllMain` of the program or DLL linking it.
 - Race when `plc_tag_shutdown()` runs while a tag is being created.
 - Race between a callback and tag destruction when create fails.
