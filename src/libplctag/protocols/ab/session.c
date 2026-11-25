@@ -357,6 +357,34 @@ extern int32_t session_set_retry_max_delay_ms(cip_conn_p session, int32_t tag_id
 }
 
 
+extern int32_t session_set_only_use_old_forward_open(cip_conn_p session, int32_t tag_id, int32_t value) {
+    if(value != 0 && value != 1) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, tag_id, "conn_only_use_old_forward_open must be 0 or 1, not %d.", value);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(!session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    atomic_set_bool(&session->only_use_old_forward_open, value == 1);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern int32_t session_get_only_use_old_forward_open(cip_conn_p session, int32_t *result) {
+    const cip_plc_type_t *plc = NULL;
+
+    if(!session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    /* identify can set the PLC type on the handler thread. */
+    critical_block(&session->session_mutex) { plc = ab_plc_type_get(session->plc_type); }
+
+    *result = (atomic_get_bool(&session->only_use_old_forward_open) || (plc && plc->fo_ex_conn_size == 0)) ? 1 : 0;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_session) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
@@ -369,7 +397,6 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
-    int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
 
@@ -414,13 +441,6 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
                 atomic_init_int32(&session->connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT);
                 atomic_init_int32(&session->connection_retry_max_delay_ms, RETRY_WAIT_MAX_MS);
 
-                /* see if we have an attribute set for forcing the use of the older ForwardOpen */
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                       "Passed attribute to prohibit use of extended ForwardOpen is %d.", only_use_old_forward_open);
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-                       "Existing attribute to prohibit use of extended ForwardOpen is %d.", session->only_use_old_forward_open);
-                session->only_use_old_forward_open = (session->only_use_old_forward_open ? 1 : only_use_old_forward_open);
-
                 new_session = 1;
             }
         } else {
@@ -441,6 +461,10 @@ int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_se
             if(attr_get_str(attribs, "connection_retry_max_delay_ms", NULL)) {
                 session_set_retry_max_delay_ms(session, 0,
                                                attr_get_int(attribs, "connection_retry_max_delay_ms", RETRY_WAIT_MAX_MS));
+            }
+
+            if(attr_get_str(attribs, "conn_only_use_old_forward_open", NULL)) {
+                session_set_only_use_old_forward_open(session, 0, attr_get_int(attribs, "conn_only_use_old_forward_open", 0));
             }
         }
     }
@@ -1215,7 +1239,7 @@ static void requeue_batch(cip_conn_p session, req_batch_t *b);
 static void session_apply_plc_type(cip_conn_p session, const cip_plc_type_t *plc) {
     session->plc_type = plc->id;
     /* the attribute can only add the restriction, never lift it from a type without the Large FO. */
-    if(plc->fo_ex_conn_size == 0) { session->only_use_old_forward_open = true; }
+    if(plc->fo_ex_conn_size == 0) { atomic_set_bool(&session->only_use_old_forward_open, true); }
     session->max_payload_size = (uint16_t)plc->fo_conn_size;
 }
 
@@ -1359,7 +1383,7 @@ static int fo_step(cip_conn_p session, session_sm_t *sm) {
             int32_t size = CIP_FO_PLAIN_MAX_SIZE;
 
             if(plc) {
-                size = (session->only_use_old_forward_open || plc->fo_ex_conn_size == 0) ? plc->fo_conn_size :
+                size = (atomic_get_bool(&session->only_use_old_forward_open) || plc->fo_ex_conn_size == 0) ? plc->fo_conn_size :
                                                                                           plc->fo_ex_conn_size;
             }
 

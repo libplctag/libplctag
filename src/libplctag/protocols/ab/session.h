@@ -109,7 +109,7 @@ struct cip_conn_t {
 
     /* connection variables. */
     bool use_connected_msg;
-    bool only_use_old_forward_open;
+    atomic_bool only_use_old_forward_open; /* any tag can set it; the handler reads it at each Forward Open. */
     uint16_t max_payload_guess;
     uint16_t max_payload_size;
 
@@ -266,6 +266,10 @@ extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new
 /* clamp, set on the shared connection, and return PLCTAG_ERR_OUT_OF_BOUNDS if clamped; any tag, any time. */
 extern int32_t session_set_inactivity_timeout_ms(cip_conn_p session, int32_t tag_id, int32_t value);
 extern int32_t session_set_retry_max_delay_ms(cip_conn_p session, int32_t tag_id, int32_t value);
+/* 0 or 1, else PLCTAG_ERR_OUT_OF_BOUNDS; used from the next Forward Open, so after a reconnect from scratch. */
+extern int32_t session_set_only_use_old_forward_open(cip_conn_p session, int32_t tag_id, int32_t value);
+/* the setting, or 1 when the PLC type has no Large Forward Open. */
+extern int32_t session_get_only_use_old_forward_open(cip_conn_p session, int32_t *result);
 /* true when an identified connection is connected and the tag asks for unconnected, or the reverse. */
 extern bool session_connected_conflicts(cip_conn_p session, int use_connected_msg);
 /* true when the connection is identified and connected.  An unidentified one is unconnected for now. */

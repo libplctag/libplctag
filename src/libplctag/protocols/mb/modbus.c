@@ -335,6 +335,8 @@ static int32_t mb_connection_get_retry_max_delay_ms(plc_tag_p tag, int32_t *resu
 static int32_t mb_connection_set_retry_max_delay_ms(plc_tag_p tag, int32_t value);
 static int32_t mb_connection_get_max_requests_in_flight(plc_tag_p tag, int32_t *result);
 static int32_t mb_connection_set_max_requests_in_flight(plc_tag_p tag, int32_t value);
+static int32_t mb_connection_get_io_events(plc_tag_p tag, int32_t *result);
+static int32_t mb_connection_set_io_events(plc_tag_p tag, int32_t value);
 static void mb_connection_tag_destructor(void *ptr);
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status);
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status);
@@ -4171,6 +4173,12 @@ static const attr_def_t mb_connection_tag_attribs[] = {
      .get_int = mb_connection_get_max_requests_in_flight,
      .set_int = mb_connection_set_max_requests_in_flight},
 
+    {.name = "ioevents",
+     .type = ATTR_TYPE_INT,
+     .description = "1 raises read and write events for the connection's IO on this tag, 0 does not.",
+     .get_int = mb_connection_get_io_events,
+     .set_int = mb_connection_set_io_events},
+
     {.name = NULL},
 };
 
@@ -4234,6 +4242,24 @@ static int32_t mb_connection_set_max_requests_in_flight(plc_tag_p tag, int32_t v
     modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
 
     return mb_plc_set_max_requests_in_flight(dt->plc, tag->tag_id, value);
+}
+
+static int32_t mb_connection_get_io_events(plc_tag_p tag, int32_t *result) {
+    *result = ((modbus_connection_tag_p)tag)->io_events;
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* the tickler reads it under the tag's api_mutex, which the set holds too. */
+static int32_t mb_connection_set_io_events(plc_tag_p tag, int32_t value) {
+    if(value != 0 && value != 1) {
+        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, tag->tag_id, "io_events must be 0 or 1, not %d.", value);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    ((modbus_connection_tag_p)tag)->io_events = value;
+
+    return PLCTAG_STATUS_OK;
 }
 
 static void mb_connection_tag_destructor(void *ptr) {

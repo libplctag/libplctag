@@ -842,6 +842,24 @@ def build_manifest() -> Manifest:
             sec.test(f"check: {conn_name} {pack_name} requests", None, F, depends_on=t.id, ports_needed=0,
                      check=CheckSpec(log_file=t.server_log_file, pattern=r"Multi-service request contains",
                                      expected=(2 if packed else 0), at_least=packed))
+    # allow_packing and conn_only_use_old_forward_open set at runtime.  The server counts what reaches it.
+    lgx_rt = f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"
+    packing_rt = sec.test("allow_packing set at runtime: 2 bare reads, 3 packed, 2 bare (AB ControlLogix)",
+              [exe("test_conn_settings"), "--mode=packing", lgx_rt], F, server=cip_ops_server(0))
+    sec.test("check: exactly the 3 reads with allow_packing=1 were packed", None, F, depends_on=packing_rt.id,
+             ports_needed=0, check=CheckSpec(log_file=packing_rt.server_log_file,
+                                             pattern=r"Multi-service request contains", expected=3))
+    old_fo_rt = sec.test("conn_only_use_old_forward_open from a join and a set, used on reconnect (AB ControlLogix)",
+              [exe("test_conn_settings"), "--mode=old-fo", lgx_rt], T, server=cip_ops_server(0))
+    sec.test("check: the first connect used the Large Forward Open", None, T, depends_on=old_fo_rt.id,
+             ports_needed=0, check=CheckSpec(log_file=old_fo_rt.server_log_file,
+                                             pattern=r"Processing Large Forward Open request", expected=1))
+    sec.test("check: the reconnect used the plain Forward Open", None, T, depends_on=old_fo_rt.id,
+             ports_needed=0, check=CheckSpec(log_file=old_fo_rt.server_log_file,
+                                             pattern=r"Processing Forward Open request", expected=1))
+    sec.test("io_events set at runtime on an @connection tag (AB ControlLogix)",
+              [exe("test_conn_settings"), "--mode=io-events", lgx_rt,
+               f"--conn-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection"], F)
     sec.test("destroy tags while their reads are queued or on the wire",
               [exe("test_cip_ops"), "--mode=destroy-in-flight", "--count=10", cip_ops_base], F, server=cip_ops_server(50))
     sec.test("450 tags read at once, more than one packet holds",
@@ -1585,6 +1603,9 @@ def build_manifest() -> Manifest:
 
     sec = m.section("micrologix", server=micrologix_server)
     list_identity(sec, "MicroLogix", 1, 12, 185, "1763-L16BWA B/12.00")
+    sec.test("allow_packing=1 refused, conn_only_use_old_forward_open always 1 (MicroLogix)",
+              [exe("test_conn_settings"), "--mode=no-packing",
+               f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N7:0"], F)
     sec.test("abort a PCCC read, then read again",
               [exe("test_write_before_read"), "--abort-reread",
                f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N7:0"], F)
@@ -1927,6 +1948,10 @@ def build_manifest() -> Manifest:
               [exe("test_retry_attr"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
     sec.test("connection settings set at create, on join and at runtime (Modbus)",
               [exe("test_conn_settings"), "--max-requests",
+               f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
+               f"--conn-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection"], F)
+    sec.test("io_events set at runtime on an @connection tag (Modbus)",
+              [exe("test_conn_settings"), "--mode=io-events",
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                f"--conn-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection"], F)
     sec.test("a joining tag's idle timeout disconnects the connection (Modbus)",

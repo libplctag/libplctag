@@ -47,14 +47,14 @@ extern "C" {
 #        define C_FUNC
 #    endif
 
-#    ifdef LIBPLCTAGDLL_EXPORTS
+#    if defined(LIBPLCTAGDLL_EXPORTS) && !defined(LIBPLCTAG_STATIC)
 #        define LIB_EXPORT __declspec(dllexport)
 #    else
 #        define LIB_EXPORT extern
 #    endif
 
 #else
-#    ifdef LIBPLCTAGDLL_EXPORTS
+#    if defined(LIBPLCTAGDLL_EXPORTS) && !defined(LIBPLCTAG_STATIC)
 #        define LIB_EXPORT __attribute__((visibility("default")))
 #    else
 #        define LIB_EXPORT extern

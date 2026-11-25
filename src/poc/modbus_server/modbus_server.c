@@ -754,6 +754,18 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
 }
 
 
+/* the flag table prints each option; this adds what it cannot: defaults, value forms and examples. */
+static void print_usage_notes(void) {
+    printf("\n"
+           "Defaults: --listen=127.0.0.1:502, --debug=INFO, 1000 of each coil and register type.\n"
+           "Fault options are off when 0 or not given.\n"
+           "Boolean options take a value: --reorder=true, --help=true.\n"
+           "\n"
+           "Examples: modbus_server --listen=0.0.0.0:5020 --holding-registers=5000\n"
+           "          modbus_server --listen=127.0.0.1:5020 --delay-ms=0.5 --max-in-flight=4\n");
+}
+
+
 /* ============================================================================
  * Main Entry Point
  * ============================================================================ */
@@ -877,12 +889,14 @@ int main(int argc, char *argv[]) {
     if(parse_rc != UTIL_OK) {
         pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to parse arguments: %s", args_get_error_detail(&args_result));
         args_print_help(argv[0], flags, num_flags);
+        print_usage_notes();
         args_free(&args_result);
         return EXIT_FAILURE;
     }
 
     if(args_get_bool(&args_result, "help")) {
         args_print_help(argv[0], flags, num_flags);
+        print_usage_notes();
         args_free(&args_result);
         return EXIT_SUCCESS;
     }

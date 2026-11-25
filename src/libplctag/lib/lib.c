@@ -162,7 +162,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                                    void *userdata, int timeout, plc_tag_p src_tag);
 
 
-#ifdef LIBPLCTAGDLL_EXPORTS
+#if defined(LIBPLCTAGDLL_EXPORTS) && !defined(LIBPLCTAG_STATIC)
 #    if defined(_WIN32) || defined(_WIN64)
 #        include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
@@ -4632,8 +4632,6 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
     if(attr_get_str(attribs, "str_pad_bytes", NULL) != NULL) { use_default = 0; }
 
-    if(attr_get_str(attribs, "str_pad_to_multiple_bytes_EXPERIMENTAL", NULL) != NULL) { use_default = 0; }
-
     if(attr_get_str(attribs, "write_pad_alignment_bytes", NULL) != NULL) { use_default = 0; }
 
     /* if we need to override something, build a new byte order structure. */
@@ -4879,9 +4877,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
         /* Should we pad the string to a multiple of 1 (no padding), 2, or 4 bytes. Adding padding causes issues when writing
            OmronNJ strings, 2 byte padding is required for certain AB PLCs*/
-        /* write_pad_alignment_bytes is the name now; the experimental one still works. */
-        const char *pad_attr = attr_get_str(attribs, "write_pad_alignment_bytes", NULL) ? "write_pad_alignment_bytes"
-                                                                                        : "str_pad_to_multiple_bytes_EXPERIMENTAL";
+        const char *pad_attr = "write_pad_alignment_bytes";
         if(attr_get_str(attribs, pad_attr, NULL)) {
             str_param = attr_get_int(attribs, pad_attr, 0);
             if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4) {

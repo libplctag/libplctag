@@ -49,6 +49,14 @@
  *                                --delay-ms=10 --max-in-flight=4; its log must reach 4 in flight and never go over.
  *   --mode=lower-limit           Modbus: a connection created at 8 is lowered to 2.  Run against modbus_server
  *                                --delay-ms=10 --max-in-flight=2; its log must reach 2 and never go over.
+ *   --mode=packing               Logix: allow_packing set at runtime.  2 bare reads, 3 packed, 2 bare; ab_server's
+ *                                log must show exactly 3 packed requests.
+ *   --mode=no-packing            a PLC type that does not pack refuses allow_packing=1, and always reports
+ *                                conn_only_use_old_forward_open as 1 (no Large Forward Open).
+ *   --mode=old-fo                Logix: conn_only_use_old_forward_open from a joining tag string and from a set; after an
+ *                                idle disconnect the reconnect uses the plain Forward Open.  ab_server's log must show
+ *                                exactly one Large and one plain Forward Open.
+ *   --mode=io-events             io_events set at runtime on the @connection tag turns its read events off and on.
  *
  * The client cannot see how many requests are on the wire, so the server counts them.
  *
@@ -73,6 +81,7 @@
 #define RETRY_RUNTIME_CAP_MS (300)
 #define RETRY_RUNTIME_WATCH_MS (4000)
 #define RETRY_RUNTIME_MIN_RETRIES (5)
+#define EVENT_SETTLE_MS (500)
 
 typedef struct {
     const char *name;
@@ -98,6 +107,7 @@ static compat_mutex_t log_mutex;
 static int32_t warn_count[3];
 static int32_t retry_count = 0;
 static int32_t retry_max_wait_ms = 0;
+static compat_atomic_int32_t conn_read_events = {0};
 static bool watch_retries = false;
 
 
@@ -122,12 +132,20 @@ static void check_max_requests_drain(void);
 static void check_limit_batches(int32_t create_limit, int32_t first_limit, int32_t second_limit);
 static void check_idle_join(void);
 static void check_retry_runtime(void);
+static void expect_flag(int32_t tag, const char *name, int32_t value, int32_t want_rc, int32_t want_value);
+static void read_n(int32_t tag, int32_t count);
+static void check_packing(void);
+static void check_no_packing(void);
+static void check_old_fo(void);
+static void conn_callback(int32_t tag_id, int event, int status, void *userdata);
+static void check_io_events(void);
 
 
 static void usage(void) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Usage: test_conn_settings --tag=<data tag> [--conn-tag=<@connection tag>] [--max-requests]\n"
-                    "                          [--mode=functional|idle-join|retry-runtime|raise-limit|lower-limit]\n");
+                    "                          [--mode=functional|idle-join|retry-runtime|raise-limit|lower-limit|\n"
+                    "                                  packing|no-packing|old-fo|io-events]\n");
     exit(1);
 }
 
@@ -150,7 +168,7 @@ static void parse_args(int argc, char **argv) {
     }
 
     if(!tag_string) { usage(); }
-    if(!conn_tag_string && strcmp(mode, "idle-join") && strcmp(mode, "retry-runtime")) { usage(); }
+    if(!conn_tag_string && (!strcmp(mode, "functional") || !strcmp(mode, "io-events"))) { usage(); }
 }
 
 
@@ -594,6 +612,178 @@ static void check_retry_runtime(void) {
 }
 
 
+/* set name through tag, check the status, then check the value read back. */
+static void expect_flag(int32_t tag, const char *name, int32_t value, int32_t want_rc, int32_t want_value) {
+    int32_t rc = plc_tag_set_int_attribute(tag, name, value);
+    int32_t got = 0;
+
+    if(rc != want_rc) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: setting %s to %d returned %s, expected %s.\n", name, (int)value, plc_tag_decode_error(rc),
+                plc_tag_decode_error(want_rc));
+        exit(1);
+    }
+
+    got = plc_tag_get_int_attribute(tag, name, GET_FAILED);
+    if(got != want_value) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: after setting %s to %d it reads %d, expected %d.\n", name, (int)value, (int)got, (int)want_value);
+        exit(1);
+    }
+}
+
+
+static void read_n(int32_t tag, int32_t count) {
+    for(int32_t i = 0; i < count; i++) {
+        int32_t rc = plc_tag_read(tag, DATA_TIMEOUT_MS);
+
+        if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR: read %d returned %s!\n", (int)i, plc_tag_decode_error(rc));
+            exit(1);
+        }
+    }
+}
+
+
+/* the server counts the packed requests: the create and 2 reads bare, 3 packed, 2 bare. */
+static void check_packing(void) {
+    int32_t tag = create_tag(tag_string, 210, "&allow_packing=0");
+
+    expect_flag(tag, "allow_packing", 0, PLCTAG_STATUS_OK, 0);
+    read_n(tag, 2);
+    expect_flag(tag, "allow_packing", 2, PLCTAG_ERR_OUT_OF_BOUNDS, 0);
+    expect_flag(tag, "allow_packing", 1, PLCTAG_STATUS_OK, 1);
+    read_n(tag, 3);
+    expect_flag(tag, "allow_packing", 0, PLCTAG_STATUS_OK, 0);
+    read_n(tag, 2);
+
+    plc_tag_destroy(tag);
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "PASS: allow_packing set at runtime (the server log has the packed count).\n");
+}
+
+
+static void check_no_packing(void) {
+    int32_t tag = create_tag(tag_string, 213, "");
+
+    expect_flag(tag, "allow_packing", 1, PLCTAG_ERR_NOT_ALLOWED, 0);
+    expect_flag(tag, "allow_packing", 0, PLCTAG_STATUS_OK, 0);
+    expect_flag(tag, "conn_only_use_old_forward_open", 0, PLCTAG_STATUS_OK, 1);
+    read_n(tag, 1);
+
+    plc_tag_destroy(tag);
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "PASS: a PLC type without packing or the Large Forward Open refuses or overrides them.\n");
+}
+
+
+/* the server counts the Forward Opens: Large for the first connect, plain for the reconnect after the set. */
+static void check_old_fo(void) {
+    char extra[128];
+    int32_t a = 0;
+    int32_t b = 0;
+    int32_t status = 0;
+
+    // NOLINTNEXTLINE
+    snprintf(extra, sizeof(extra), "&connection_inactivity_timeout_ms=%d", IDLE_JOIN_TIMEOUT_MS);
+    a = create_tag(tag_string, 211, extra);
+
+    if(plc_tag_get_int_attribute(a, "conn_only_use_old_forward_open", GET_FAILED) != 0) {
+        fail("a Logix connection should start with the Large Forward Open allowed.");
+    }
+
+    /* a joining tag's string applies to the connection. */
+    b = create_tag(tag_string, 211, "&conn_only_use_old_forward_open=1");
+    if(plc_tag_get_int_attribute(a, "conn_only_use_old_forward_open", GET_FAILED) != 1) {
+        fail("a joining tag's conn_only_use_old_forward_open=1 did not reach the connection.");
+    }
+
+    expect_flag(a, "conn_only_use_old_forward_open", 2, PLCTAG_ERR_OUT_OF_BOUNDS, 1);
+    expect_flag(a, "conn_only_use_old_forward_open", 0, PLCTAG_STATUS_OK, 0);
+    expect_flag(b, "conn_only_use_old_forward_open", 1, PLCTAG_STATUS_OK, 1);
+
+    /* in use until the connection reconnects from scratch. */
+    compat_sleep_ms(IDLE_JOIN_WAIT_MS, NULL);
+
+    status = plc_tag_get_int_attribute(a, "connection_status", GET_FAILED);
+    if(status != PLCTAG_CONN_STATUS_IDLE_WAIT) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: the connection did not go idle, status %d.\n", (int)status);
+        exit(1);
+    }
+
+    read_n(a, 1);
+
+    plc_tag_destroy(b);
+    plc_tag_destroy(a);
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "PASS: conn_only_use_old_forward_open from a join and a set (the server log has the Forward Opens).\n");
+}
+
+
+static void conn_callback(int32_t tag_id, int event, int status, void *userdata) {
+    (void)tag_id;
+    (void)status;
+    (void)userdata;
+
+    if(event == PLCTAG_EVENT_READ_COMPLETED) { compat_atomic_inc_int32(&conn_read_events); }
+}
+
+
+static void check_io_events(void) {
+    char buf[1024];
+    int32_t conn = 0;
+    int32_t data = 0;
+    int32_t count = 0;
+
+    // NOLINTNEXTLINE
+    snprintf(buf, sizeof(buf), "%s&connection_group_id=212", conn_tag_string);
+    conn = plc_tag_create_ex(buf, conn_callback, NULL, DATA_TIMEOUT_MS);
+    if(conn < 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: could not create \"%s\", %s!\n", buf, plc_tag_decode_error(conn));
+        exit(1);
+    }
+
+    data = create_tag(tag_string, 212, "");
+
+    if(plc_tag_get_int_attribute(conn, "io_events", GET_FAILED) != 1) { fail("io_events should default to 1."); }
+
+    read_n(data, 2);
+    compat_sleep_ms(EVENT_SETTLE_MS, NULL);
+    if(compat_atomic_load_int32(&conn_read_events) == 0) { fail("no read events with io_events=1."); }
+
+    expect_flag(conn, "io_events", 2, PLCTAG_ERR_OUT_OF_BOUNDS, 1);
+    expect_flag(conn, "io_events", 0, PLCTAG_STATUS_OK, 0);
+    compat_sleep_ms(EVENT_SETTLE_MS, NULL);
+    compat_atomic_store_int32(&conn_read_events, 0);
+
+    read_n(data, 3);
+    compat_sleep_ms(EVENT_SETTLE_MS, NULL);
+    count = compat_atomic_load_int32(&conn_read_events);
+    if(count != 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: %d read events with io_events=0.\n", (int)count);
+        exit(1);
+    }
+
+    expect_flag(conn, "io_events", 1, PLCTAG_STATUS_OK, 1);
+    read_n(data, 2);
+    compat_sleep_ms(EVENT_SETTLE_MS, NULL);
+    if(compat_atomic_load_int32(&conn_read_events) == 0) { fail("no read events after io_events was set back to 1."); }
+
+    plc_tag_destroy(data);
+    plc_tag_destroy(conn);
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "PASS: io_events set at runtime turns the @connection tag's read events off and on.\n");
+}
+
+
 int main(int argc, char **argv) {
     parse_args(argc, argv);
 
@@ -616,6 +806,14 @@ int main(int argc, char **argv) {
         check_limit_batches(1, 1, 4);
     } else if(!strcmp(mode, "lower-limit")) {
         check_limit_batches(8, 0, 2);
+    } else if(!strcmp(mode, "packing")) {
+        check_packing();
+    } else if(!strcmp(mode, "no-packing")) {
+        check_no_packing();
+    } else if(!strcmp(mode, "old-fo")) {
+        check_old_fo();
+    } else if(!strcmp(mode, "io-events")) {
+        check_io_events();
     } else {
         usage();
     }

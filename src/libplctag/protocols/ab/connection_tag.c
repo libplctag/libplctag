@@ -64,6 +64,10 @@ static int32_t connection_get_inactivity_timeout_ms(plc_tag_p tag, int32_t *resu
 static int32_t connection_set_inactivity_timeout_ms(plc_tag_p tag, int32_t value);
 static int32_t connection_get_retry_max_delay_ms(plc_tag_p tag, int32_t *result);
 static int32_t connection_set_retry_max_delay_ms(plc_tag_p tag, int32_t value);
+static int32_t connection_get_only_use_old_forward_open(plc_tag_p tag, int32_t *result);
+static int32_t connection_set_only_use_old_forward_open(plc_tag_p tag, int32_t value);
+static int32_t connection_get_io_events(plc_tag_p tag, int32_t *result);
+static int32_t connection_set_io_events(plc_tag_p tag, int32_t value);
 static void ab_connection_tag_destructor(void *ptr);
 static const char *conn_status_name(int32_t conn_status);
 
@@ -85,6 +89,18 @@ static const attr_def_t connection_tag_attribs[] = {
      .description = "The longest wait between reconnect attempts, in milliseconds.",
      .get_int = connection_get_retry_max_delay_ms,
      .set_int = connection_set_retry_max_delay_ms},
+
+    {.name = "connonlyuseoldforwardopen",
+     .type = ATTR_TYPE_INT,
+     .description = "The session uses the original Forward Open only, never the large one.",
+     .get_int = connection_get_only_use_old_forward_open,
+     .set_int = connection_set_only_use_old_forward_open},
+
+    {.name = "ioevents",
+     .type = ATTR_TYPE_INT,
+     .description = "1 raises read and write events for the session's IO on this tag, 0 does not.",
+     .get_int = connection_get_io_events,
+     .set_int = connection_set_io_events},
 
     {.name = NULL},
 };
@@ -293,6 +309,36 @@ static int32_t connection_set_retry_max_delay_ms(plc_tag_p tag, int32_t value) {
     ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
 
     return session_set_retry_max_delay_ms(conn_tag->session, tag->tag_id, value);
+}
+
+static int32_t connection_get_only_use_old_forward_open(plc_tag_p tag, int32_t *result) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    return session_get_only_use_old_forward_open(conn_tag->session, result);
+}
+
+static int32_t connection_set_only_use_old_forward_open(plc_tag_p tag, int32_t value) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    return session_set_only_use_old_forward_open(conn_tag->session, tag->tag_id, value);
+}
+
+static int32_t connection_get_io_events(plc_tag_p tag, int32_t *result) {
+    *result = ((ab_connection_tag_t *)tag)->io_events;
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* the tickler reads it under the tag's api_mutex, which the set holds too. */
+static int32_t connection_set_io_events(plc_tag_p tag, int32_t value) {
+    if(value != 0 && value != 1) {
+        pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_WARN, tag->tag_id, "io_events must be 0 or 1, not %d.", value);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    ((ab_connection_tag_t *)tag)->io_events = value;
+
+    return PLCTAG_STATUS_OK;
 }
 
 static void ab_connection_tag_destructor(void *ptr) {

@@ -345,6 +345,11 @@ if(NOT WIN32)
     # program could collide with (review M3).  Uses nm, so POSIX only.
     add_test(NAME unit_test_exported_symbols
              COMMAND sh -c "! nm -g '$<TARGET_FILE:plctag_static>' | grep -E ' [BDCS] _?(mb_mutex|plcs|modbus_tag_byte_order)$'")
+
+    # unit_test_static_api_hidden: the static library exports no plc_tag_* function, so a
+    # shared library linking it does not re-export the API (issue #692).
+    add_test(NAME unit_test_static_api_hidden
+             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/check_static_exports.sh $<TARGET_FILE:plctag_static>)
 endif()
 
 # test_cip_status: the CIP error status prefix parser and the status codes the Forward Open

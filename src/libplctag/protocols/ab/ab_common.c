@@ -641,6 +641,9 @@ int cip_tag_data_type(ab_tag_p tag, attr attribs) {
     /* look for the elem_type attribute. */
     elem_type = attr_get_str(attribs, "elem_type", NULL);
     if(elem_type) {
+        /* PCCC tags take the type from the data file in the name; CIP tags get it from the PLC or the byte order attributes. */
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "The attribute \"elem_type\" is deprecated and will be removed.");
+
         if(str_cmp_i(elem_type, "lint") == 0 || str_cmp_i(elem_type, "ulint") == 0) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 64-bit integer.");
             tag->elem_size = 8;
@@ -1249,6 +1252,27 @@ static int32_t ab_get_allow_packing(plc_tag_p raw_tag, int32_t *result) {
 }
 
 
+/* the tag's own flag: 0 sends each of its requests alone.  Used from its next request. */
+static int32_t ab_set_allow_packing(plc_tag_p raw_tag, int32_t value) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+    const cip_plc_type_t *plc = ab_plc_type_get(tag->plc_type);
+
+    if(value != 0 && value != 1) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "allow_packing must be 0 or 1, not %d.", value);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(value == 1 && !(plc && plc->allow_packing)) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "This PLC type does not pack requests.");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    tag->allow_packing = value;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 static int32_t ab_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
@@ -1304,12 +1328,14 @@ static int32_t ab_get_path_size(plc_tag_p raw_tag) {
 static int32_t ab_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result) {
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+    return session_get_only_use_old_forward_open(tag->session, result);
+}
 
-    /* identify can set it on the handler thread. */
-    critical_block(&tag->session->session_mutex) { *result = (int32_t)tag->session->only_use_old_forward_open; }
 
-    return PLCTAG_STATUS_OK;
+static int32_t ab_set_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t value) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    return session_set_only_use_old_forward_open(tag->session, tag->tag_id, value);
 }
 
 
@@ -1324,9 +1350,10 @@ const attr_def_t ab_attribs[] = {
      .description = "The number of elements this tag holds.",
      .get_int = ab_get_elem_count},
 
+    /* Deprecated: being removed. */
     {.name = "elemtype",
      .type = ATTR_TYPE_INT,
-     .description = "The PLC's type code for a single element of this tag.",
+     .description = "Deprecated. The PLC's type code for a single element of this tag.",
      .get_int = ab_get_elem_type},
 
     {.name = "connectionstatus",
@@ -1359,8 +1386,8 @@ const attr_def_t ab_attribs[] = {
      .description = "Deprecated, use plc_tag_get_attribute_size(). The size of raw_tag_type_bytes in bytes.",
      .get_int = ab_get_raw_tag_type_bytes_length},
 
-    /* Read-only after creation.  Those on the shared session report PLCTAG_ERR_NOT_FOUND
-     * until it exists. */
+    /* Read-only after creation, except allow_packing and conn_only_use_old_forward_open.  Those on
+     * the shared session report PLCTAG_ERR_NOT_FOUND until it exists. */
     {.name = "plc",
      .type = ATTR_TYPE_STRING,
      .description = "The PLC family this tag talks to, as a canonical name.",
@@ -1375,7 +1402,8 @@ const attr_def_t ab_attribs[] = {
     {.name = "allowpacking",
      .type = ATTR_TYPE_INT,
      .description = "This tag's requests may be packed with others into one CIP request.",
-     .get_int = ab_get_allow_packing},
+     .get_int = ab_get_allow_packing,
+     .set_int = ab_set_allow_packing},
 
     {.name = "gateway",
      .type = ATTR_TYPE_STRING,
@@ -1397,7 +1425,8 @@ const attr_def_t ab_attribs[] = {
     {.name = "connonlyuseoldforwardopen",
      .type = ATTR_TYPE_INT,
      .description = "This tag's session uses the original Forward Open only, never the large one.",
-     .get_int = ab_get_conn_only_use_old_forward_open},
+     .get_int = ab_get_conn_only_use_old_forward_open,
+     .set_int = ab_set_conn_only_use_old_forward_open},
 
     {.name = NULL},
 };

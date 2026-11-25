@@ -413,6 +413,7 @@ static int32_t core_set_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t value)
 
 
 static int32_t core_get_bit_num(plc_tag_p tag, int32_t *result) {
+    /* FIXME: does not check tag->is_bit, so a tag that is not a bit tag reports bit 0. */
     *result = (int32_t)(uint32_t)(tag->bit);
 
     return PLCTAG_STATUS_OK;
