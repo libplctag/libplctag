@@ -207,10 +207,16 @@ int main(void) {
 
     tag = open_tag(DEFAULT_TAG);
 
-    printf("Read-only core attributes.\n");
+    printf("size round trips at runtime.\n");
 
     /* the tag is a single DINT element. */
     check_get(tag, "size", 4);
+    check_set(tag, "size", 8, PLCTAG_STATUS_OK);
+    check_get(tag, "size", 8);
+    check_set(tag, "size", 4, PLCTAG_STATUS_OK);
+    check_get(tag, "size", 4);
+
+    printf("Read-only core attributes.\n");
 
     /* not a bit tag, so the bit number is zero. */
     check_get(tag, "bit_num", 0);
@@ -220,7 +226,6 @@ int main(void) {
 
     printf("Read-only core attributes reject a write.\n");
 
-    check_set(tag, "size", 8, PLCTAG_ERR_UNSUPPORTED);
     check_set(tag, "bit_num", 3, PLCTAG_ERR_UNSUPPORTED);
     check_set(tag, "connection_group_id", 1, PLCTAG_ERR_UNSUPPORTED);
 

@@ -35,7 +35,7 @@
 /*
  * plc_tag_set_size() on a tag whose data buffer is part of the tag allocation (Modbus, system)
  * must fail and leave the size and the data alone.  It used to realloc a pointer into the
- * middle of the tag allocation.
+ * middle of the tag allocation.  Setting the "size" attribute must fail the same way.
  *
  * Usage: test_set_size_fixed --tag=<attribs of a Modbus or system tag>
  */
@@ -102,18 +102,21 @@ int main(int argc, char **argv) {
 
 
 static bool set_size_fails(int32_t tag, int32_t old_size, int32_t new_size) {
-    int32_t rc = plc_tag_set_size(tag, new_size);
+    for(int32_t use_attr = 0; use_attr < 2; use_attr++) {
+        const char *how = use_attr ? "plc_tag_set_int_attribute(\"size\")" : "plc_tag_set_size()";
+        int32_t rc = use_attr ? plc_tag_set_int_attribute(tag, "size", new_size) : plc_tag_set_size(tag, new_size);
 
-    fprintf(stderr, "plc_tag_set_size(%" PRId32 ") returned %s.\n", new_size, plc_tag_decode_error(rc));
+        fprintf(stderr, "%s with %" PRId32 " returned %s.\n", how, new_size, plc_tag_decode_error(rc));
 
-    if(rc >= 0) {
-        fprintf(stderr, "FAIL: setting the size to %" PRId32 " succeeded.\n", new_size);
-        return false;
-    }
+        if(rc >= 0) {
+            fprintf(stderr, "FAIL: %s with %" PRId32 " succeeded.\n", how, new_size);
+            return false;
+        }
 
-    if(plc_tag_get_size(tag) != old_size) {
-        fprintf(stderr, "FAIL: size changed to %" PRId32 ".\n", plc_tag_get_size(tag));
-        return false;
+        if(plc_tag_get_size(tag) != old_size) {
+            fprintf(stderr, "FAIL: size changed to %" PRId32 ".\n", plc_tag_get_size(tag));
+            return false;
+        }
     }
 
     return true;

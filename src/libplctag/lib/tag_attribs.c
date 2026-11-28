@@ -45,6 +45,7 @@
 
 
 static int32_t core_get_size(plc_tag_p tag, int32_t *result);
+static int32_t core_set_size(plc_tag_p tag, int32_t value);
 static int32_t core_get_read_cache_ms(plc_tag_p tag, int32_t *result);
 static int32_t core_set_read_cache_ms(plc_tag_p tag, int32_t value);
 static int32_t core_get_auto_sync_read_ms(plc_tag_p tag, int32_t *result);
@@ -96,8 +97,9 @@ static const attr_def_t *attr_table_find(const attr_def_t *table, const char *na
 static const attr_def_t core_attribs[] = {
     {.name = "size",
      .type = ATTR_TYPE_INT,
-     .description = "The size of the tag data buffer in bytes.",
-     .get_int = core_get_size},
+     .description = "The size of the tag data buffer in bytes.  Setting it resizes the buffer, as plc_tag_set_size() does.",
+     .get_int = core_get_size,
+     .set_int = core_set_size},
 
     {.name = "readcachems",
      .type = ATTR_TYPE_INT,
@@ -307,6 +309,9 @@ static int32_t core_get_size(plc_tag_p tag, int32_t *result) {
 
     return PLCTAG_STATUS_OK;
 }
+
+
+static int32_t core_set_size(plc_tag_p tag, int32_t value) { return tag_set_size_unsafe(tag, value); }
 
 
 static int32_t core_get_read_cache_ms(plc_tag_p tag, int32_t *result) {

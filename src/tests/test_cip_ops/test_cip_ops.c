@@ -47,8 +47,8 @@
  *                          Multiple Service Packet; all complete with good data.
  *   callback-holds-mutex   a tag's reply arrives while its own callback is running, and so
  *                          holding the tag's API mutex; the write completes once it returns.
- *   set-size-busy          plc_tag_set_size fails with BUSY while a read or write is in flight, and
- *                          works once it ends.  Needs a server delay.
+ *   set-size-busy          plc_tag_set_size and the "size" attribute fail with BUSY while a read
+ *                          or write is in flight, and work once it ends.  Needs a server delay.
  *   read-cache             an async read fills the read cache, and cache hits do not restart its
  *                          window, so a tag read faster than read_cache_ms still reaches the PLC (#683).
  *
@@ -468,12 +468,36 @@ static int32_t run_set_size_busy(const char *base) {
             failures++;
         }
 
+        rc = plc_tag_set_int_attribute(id, "size", 8);
+        if(rc != PLCTAG_ERR_BUSY) {
+            printf("FAIL: setting \"size\" during a %s returned %s, not BUSY.\n", op, plc_tag_decode_error(rc));
+            failures++;
+        }
+
         if(wait_not_pending(&id, 1, DATA_TIMEOUT) != PLCTAG_STATUS_OK) { failures++; }
     }
 
     rc = plc_tag_set_size(id, 8);
     if(rc < 0) {
         printf("FAIL: plc_tag_set_size on an idle tag returned %s.\n", plc_tag_decode_error(rc));
+        failures++;
+    }
+
+    /* the attribute runs the same code: it resizes, reads back, and refuses a negative size. */
+    rc = plc_tag_set_int_attribute(id, "size", 12);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("FAIL: setting \"size\" on an idle tag returned %s.\n", plc_tag_decode_error(rc));
+        failures++;
+    } else if(plc_tag_get_int_attribute(id, "size", -1) != 12 || plc_tag_get_size(id) != 12) {
+        printf("FAIL: after setting \"size\" to 12 the attribute reads %d and plc_tag_get_size() %d.\n",
+               plc_tag_get_int_attribute(id, "size", -1), plc_tag_get_size(id));
+        failures++;
+    }
+
+    rc = plc_tag_set_int_attribute(id, "size", -1);
+    if(rc != PLCTAG_ERR_BAD_PARAM || plc_tag_get_size(id) != 12) {
+        printf("FAIL: setting \"size\" to -1 returned %s and left the size %d.\n", plc_tag_decode_error(rc),
+               plc_tag_get_size(id));
         failures++;
     }
 

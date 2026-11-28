@@ -302,6 +302,12 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
 /**
  * @brief Create a new tag based on an existing tag.
  *
+ * The new tag reuses the source tag's underlying connection.  The source can be a data tag or an
+ * "@connection" tag.  Connection attributes (protocol, gateway, path, plc) come from that connection
+ * and should not be repeated in attrib_str.  An attribute in attrib_str that conflicts with the
+ * existing connection, such as use_connected_msg=1 on an unconnected connection, fails the create
+ * with PLCTAG_ERR_BAD_PARAM.
+ *
  * @param src_tag_id Source tag ID to copy attributes from.
  * @param attrib_str additional attributes for a tag based on the protocol and device of the source tag.
  * @param tag_callback_func Callback function for tag events.

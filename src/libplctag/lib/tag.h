@@ -106,6 +106,10 @@ extern const attr_def_t *attr_find(plc_tag_p tag, const char *name);
  * accessors take a NULL tag. */
 extern const attr_def_t *attr_find_lib(const char *name);
 
+/* Resize the tag's data buffer.  The caller holds tag->api_mutex.  PLCTAG_ERR_BAD_PARAM for a
+ * negative size, PLCTAG_ERR_BUSY while a read or write is in flight. */
+extern int32_t tag_set_size_unsafe(plc_tag_p tag, int32_t new_size);
+
 /* Helpers for an ATTR_TYPE_STRING accessor.  attr_copy_string() copies str and its
  * terminator into buffer and returns the number of bytes copied, or PLCTAG_ERR_TOO_SMALL.
  * attr_string_size() returns what plc_tag_get_attribute_size() should report for str. */

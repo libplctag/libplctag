@@ -124,7 +124,8 @@ static int64_t reuse_hash(const char *reuse_str);
 static plc_tag_p find_reusable_unsafe(lib_instance_p inst, const char *reuse_str);
 static void forget_reusable_unsafe(lib_instance_p inst, plc_tag_p tag);
 static plc_tag_p remove_tag_unsafe(lib_instance_p inst, int64_t tag_id);
-static int32_t reuse_existing(plc_tag_p tag, int timeout);
+static int32_t reuse_existing(plc_tag_p tag, int timeout,
+                              void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
 static int32_t create_failed(plc_tag_p tag, int32_t rc);
 static void destroy_tag_common(plc_tag_p tag);
 static bool tag_idle_expired_unsafe(plc_tag_p tag, int64_t now);
@@ -1216,9 +1217,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* a shared tag has no single owner for a callback, and a clone is a new tag by design. */
-    if(reuse == 1 && (tag_callback_func || src_tag)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "find_or_create_tag cannot be used with a callback or plc_tag_create_from_tag()!");
+    /* a clone is a new tag by design. */
+    if(reuse == 1 && src_tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "find_or_create_tag cannot be used with plc_tag_create_from_tag()!");
         attr_destroy(attribs);
         return PLCTAG_ERR_NOT_ALLOWED;
     }
@@ -1252,7 +1253,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         if(existing) {
             attr_destroy(attribs);
             rc_dec(inst);
-            return reuse_existing(existing, timeout);
+            return reuse_existing(existing, timeout, tag_callback_func, userdata);
         }
     }
 
@@ -1417,7 +1418,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(existing) {
         rc_dec(tag);
         rc_dec(tag);
-        return reuse_existing(existing, timeout);
+        return reuse_existing(existing, timeout, tag_callback_func, userdata);
     }
 
     /* tag->tag_id is already set (add_tag_lookup() sets it under tag_lookup_mutex,
@@ -2857,17 +2858,7 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    if(new_size < 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Illegal new size %d bytes.  Tag size must be positive.", new_size);
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* the I/O thread uses the buffer while an op is in flight. */
-    critical_block(&tag->api_mutex) {
-        rc = (tag->read_in_flight || tag->write_in_flight) ? PLCTAG_ERR_BUSY : resize_tag_buffer_unsafe(tag, new_size);
-    }
+    critical_block(&tag->api_mutex) { rc = tag_set_size_unsafe(tag, (int32_t)new_size); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -5377,6 +5368,20 @@ int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val) {
 }
 
 
+extern int32_t tag_set_size_unsafe(plc_tag_p tag, int32_t new_size) {
+    if(new_size < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Illegal new size %" PRId32 " bytes.  Tag size must be positive.",
+               new_size);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* the I/O thread uses the buffer while an op is in flight. */
+    if(tag->read_in_flight || tag->write_in_flight) { return PLCTAG_ERR_BUSY; }
+
+    return (int32_t)resize_tag_buffer_unsafe(tag, (int)new_size);
+}
+
+
 int resize_tag_buffer_unsafe(plc_tag_p tag, int new_size) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -5576,13 +5581,15 @@ int32_t create_failed(plc_tag_p tag, int32_t rc) {
 /*
  * Return the handle of a reusable tag to a create that found it, and drop the find's reference.
  * A create still running is waited for, as a new one would be.  A failed create stays failed, so
- * it leaves the reuse table and the next create makes a new tag.
+ * it leaves the reuse table and the next create makes a new tag.  A callback is registered as
+ * plc_tag_register_callback_ex() does: PLCTAG_ERR_DUPLICATE if the tag already has one.
  *
- * ponytail: shared tags have no callback, so no CREATED event marks the end of the create.  The
- * first status that is not PENDING stands in for it.  A read that fails after an async create
- * nobody checked is taken as a failed create; record the result in each protocol if that matters.
+ * ponytail: the first status that is not PENDING stands in for the end of the create.  A read
+ * that fails after an async create nobody checked is taken as a failed create; record the result
+ * in each protocol if that matters.
  */
-int32_t reuse_existing(plc_tag_p tag, int timeout) {
+int32_t reuse_existing(plc_tag_p tag, int timeout,
+                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata) {
     int32_t rc = PLCTAG_STATUS_PENDING;
     int64_t end_time = time_ms() + timeout;
 
@@ -5614,7 +5621,23 @@ int32_t reuse_existing(plc_tag_p tag, int timeout) {
     /* an async create returns its handle while it is still pending. */
     if(rc == PLCTAG_STATUS_PENDING || rc == PLCTAG_STATUS_OK) {
         rc = tag->tag_id;
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, rc, "Reusing tag %" PRId32 ".", rc);
+
+        if(tag_callback_func) {
+            critical_block(&tag->api_mutex) {
+                if(tag->callback) {
+                    rc = PLCTAG_ERR_DUPLICATE;
+                } else {
+                    tag->callback = tag_callback_func;
+                    tag->userdata = userdata;
+                }
+            }
+        }
+
+        if(rc == PLCTAG_ERR_DUPLICATE) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Reused tag already has a callback!");
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, rc, "Reusing tag %" PRId32 ".", rc);
+        }
     } else {
         if(rc != PLCTAG_ERR_TIMEOUT) {
             critical_block(&tag->instance->tag_lookup_mutex) { forget_reusable_unsafe(tag->instance, tag); }

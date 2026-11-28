@@ -4,10 +4,11 @@
 
 ### New
 
-- `find_or_create_tag=1` returns the existing tag for the same tag string instead of creating a new one.
+- `find_or_create_tag=1` returns the existing tag for the same tag string instead of creating a new one.  A create with a callback that finds a tag registers the callback on it, or fails with `PLCTAG_ERR_DUPLICATE` if the tag already has one.
 - `destroy_tag_after_idle_sec` destroys a tag after it goes this many seconds without a read or write.
 - `connection_retry_max_delay_ms` caps the wait between reconnect attempts.
 - `plc_tag_get_attribute_size()` returns the buffer size an attribute needs.
+- The `size` attribute can be set: `plc_tag_set_int_attribute(tag, "size", n)` resizes the tag's buffer, as `plc_tag_set_size()` does.
 - Attributes set in the tag string can be read back after create: `plc`, `gateway`, `gateway_port`, `path`, `use_connected_msg`, `allow_packing`, `connection_group_id`, `find_or_create_tag`, `conn_only_use_old_forward_open`, the `str_*` attributes and the byte orders.
 - Attribute names ignore case and `_`, in tag strings and in the attribute functions: `elem_count`, `ElemCount` and `ELEM_COUNT` are the same.
 - `plc` is optional for CIP devices: without it the library reads the Identity object and picks the PLC type from the product name.
@@ -43,7 +44,6 @@
 
 ### Fixed
 
-- #666, #669, #670: underflows, numeric segment overflow and untrusted input handling.
 - #672: Omron fragment handling.
 - #673: session create race.
 - #675: livelock when the peer closes the socket during Forward Open.

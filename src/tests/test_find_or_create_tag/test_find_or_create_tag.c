@@ -41,8 +41,9 @@
  *   6  (--missing-tag= only) a failed create: the second create gets the error, a later one
  *      makes a new tag.
  *   7  16 threads creating one string at once all get one handle.
- *   8  the attribute reads back, is not writable, and is refused with a callback, with
- *      create_from_tag and with a value other than 0 or 1.
+ *   8  the attribute reads back, is not writable, and is refused with create_from_tag and with
+ *      a value other than 0 or 1.  A create with a callback registers it on the found tag, and
+ *      gets PLCTAG_ERR_DUPLICATE if the tag already has one.
  *   9  a reusable tag auto-destroyed by destroy_tag_after_idle_sec is not found again.
  *
  * Each case adds its own read_cache_ms value, so no two cases share a string.
@@ -329,10 +330,22 @@ static void case_attribute(void) {
         expect_rc(8, plc_tag_get_int_attribute(plain, "find_or_create_tag", -1), 0, "attribute read without it");
     }
 
+    /* a create with a callback registers it on the found tag as plc_tag_register_callback_ex() does. */
     make_str(str, base_tag, 8, "&" REUSE);
     rc = plc_tag_create_ex(str, dummy_callback, NULL, DATA_TIMEOUT);
-    if(rc > 0) { plc_tag_destroy(rc); }
-    expect_rc(8, rc, PLCTAG_ERR_NOT_ALLOWED, "create with a callback");
+    if(rc > 0 && rc != a) { plc_tag_destroy(rc); }
+    expect_rc(8, rc, a, "create with a callback");
+
+    rc = plc_tag_create_ex(str, dummy_callback, NULL, DATA_TIMEOUT);
+    if(rc > 0 && rc != a) { plc_tag_destroy(rc); }
+    expect_rc(8, rc, PLCTAG_ERR_DUPLICATE, "create with a callback when the tag has one");
+    expect_rc(8, plc_tag_register_callback_ex(a, dummy_callback, NULL), PLCTAG_ERR_DUPLICATE, "register when the tag has one");
+
+    /* to change the callback the app removes the old one first. */
+    expect_rc(8, plc_tag_unregister_callback(a), PLCTAG_STATUS_OK, "unregister");
+    rc = plc_tag_create_ex(str, dummy_callback, NULL, DATA_TIMEOUT);
+    if(rc > 0 && rc != a) { plc_tag_destroy(rc); }
+    expect_rc(8, rc, a, "create with a callback after unregister");
 
     make_str(str, base_tag, 8, "&find_or_create_tag=2");
     rc = create(str, DATA_TIMEOUT);
