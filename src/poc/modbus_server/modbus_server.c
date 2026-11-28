@@ -43,6 +43,7 @@
 #ifdef _WIN32
 #    include <winsock2.h>
 #    include <ws2tcpip.h>
+#    define SHUT_WR SD_SEND
 #else
 #    include <sys/socket.h>
 #    include <netinet/in.h>
@@ -68,6 +69,7 @@ typedef struct modbus_client_s modbus_client_t;
 
 #define MODBUS_RECV_BUFFER_SIZE 512
 #define MODBUS_SEND_BUFFER_SIZE 512
+#define REORDER_WAIT_US (50000) /* how long --reorder waits for a request to answer first */
 
 /* Histogram bucket boundaries (in microseconds) */
 #define HIST_BUCKET_COUNT 8
@@ -133,6 +135,20 @@ struct server_ctx_s {
     volatile int running;
     int64_t start_time_us;
     server_stats_t stats;
+
+    /* fault injection for client tests */
+    bool reorder;         /* answer a pipelined request before the one ahead of it */
+    int64_t close_every;  /* drop the connection, unanswered, on every Nth request; 0 = never */
+    int64_t close_after_bytes; /* send this many bytes on a connection, cutting a response short, then close; 0 = never */
+    int64_t startup_close_ms;  /* for this long after startup, accept every connection and close it at once; 0 = never */
+    int64_t requests_seen;
+    int64_t max_in_flight;  /* --max-in-flight: report more unanswered requests than this; 0 = off */
+    int64_t most_in_flight; /* the most unanswered requests seen at once */
+
+    /* --delay-ms: hold every response this long after its request arrives, and the delay applied. */
+    int64_t delay_us;
+    int64_t delay_applied_us;
+    int64_t delay_count;
 };
 
 /* ============================================================================
@@ -149,6 +165,23 @@ struct modbus_client_s {
     mbap_header_t mbap_header;
     uint16_t expected_pdu_length;
     request_timing_t timing;
+
+    /* --reorder: the reply held back until the request behind it is answered. */
+    uint8_t held_buffer[MODBUS_SEND_BUFFER_SIZE];
+    size_t held_size;
+    int64_t reorder_deadline_us;
+
+    /* --delay-ms: when this response may go out (util_mono_us) and when its request arrived. */
+    int64_t delay_start_us;
+    int64_t delay_deadline_us;
+
+    /* --close-after-bytes: bytes sent on this connection so far, and close once this reply is out.
+     * In the client, not locals: a coroutine's locals do not survive coro_yield(). */
+    int64_t bytes_sent;
+    bool close_after_send;
+
+    /* --close-after-bytes: the send side is shut; requests are dropped until the client closes. */
+    bool draining;
 };
 
 
@@ -348,6 +381,51 @@ static util_err_t modbus_frame_check(buf_t *buf, void *context) {
 }
 
 
+/* whole requests waiting in the buffer behind the one being answered. */
+static int64_t frames_waiting(buf_t *buf) {
+    const uint8_t *data = buf_data(buf);
+    size_t pos = buf_read_pos(buf);
+    size_t end = buf_write_pos(buf);
+    int64_t count = 0;
+
+    while(end - pos >= 6) {
+        size_t frame_size = (size_t)6 + (((size_t)data[pos + 4] << 8) | data[pos + 5]);
+
+        if(end - pos < frame_size) { break; }
+
+        pos += frame_size;
+        count++;
+    }
+
+    return count;
+}
+
+
+/* --random-fill: n pseudo-random bytes, xorshift32 on *state, which must not be 0. */
+static void fill_random(uint8_t *bytes, size_t n, uint32_t *state) {
+    for(size_t i = 0; bytes && i < n; i++) {
+        *state ^= *state << 13;
+        *state ^= *state >> 17;
+        *state ^= *state << 5;
+        bytes[i] = (uint8_t)*state;
+    }
+}
+
+
+/* --max-in-flight: the client may not have more than max_in_flight requests unanswered. */
+static void check_in_flight(server_ctx_t *server, int64_t in_flight) {
+    if(in_flight > server->most_in_flight) {
+        server->most_in_flight = in_flight;
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Requests in flight: new high of %" PRId64 ".", in_flight);
+    }
+
+    if(in_flight > server->max_in_flight) {
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Over the limit: %" PRId64 " requests in flight, the limit is %" PRId64 ".",
+              in_flight, server->max_in_flight);
+    }
+}
+
+
 static void client_handler(coro_task_handle_t handle, socket_t fd, void *context) {
     modbus_client_t *client = (modbus_client_t *)context;
     uint8_t function_code;
@@ -382,6 +460,7 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
 
         /* Capture timestamps after we exit the loop (data arrived or error occurred) */
         client->timing.recv_complete_us = util_time_us();
+        client->delay_start_us = util_mono_us();
         /* For simplicity, use same timestamp for first byte and complete in the refactored version
          * This is acceptable since socket_recv_frame() typically completes in one call for small Modbus frames */
         client->timing.first_byte_us = client->timing.recv_complete_us;
@@ -400,7 +479,21 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->recv_buf);
 
         /* get the header info */
+        size_t frame_start = buf_read_pos(&client->recv_buf);
         modbus_parse_mbap_header(&client->recv_buf, &client->mbap_header);
+        size_t frame_size = (size_t)6 + client->mbap_header.length; /* MBAP length counts from the unit ID */
+
+        if(client->draining) {
+            buf_read_advance(&client->recv_buf, frame_start + frame_size - buf_read_pos(&client->recv_buf));
+            continue;
+        }
+
+        client->server->requests_seen++;
+        if(client->server->close_every > 0 && (client->server->requests_seen % client->server->close_every) == 0) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Fault: closing the connection unanswered on request %" PRId64 ".",
+                  client->server->requests_seen);
+            break;
+        }
 
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL,
               "MBAP Header - Transaction ID: %u, Protocol ID: %u, Length: %u, Unit ID: %u", client->mbap_header.transaction_id,
@@ -426,6 +519,11 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         /* Capture process complete time */
         client->timing.process_complete_us = util_time_us();
 
+        /* step over whatever of the frame the processing left, so the next frame starts clean. */
+        if(buf_read_pos(&client->recv_buf) < frame_start + frame_size) {
+            buf_read_advance(&client->recv_buf, frame_start + frame_size - buf_read_pos(&client->recv_buf));
+        }
+
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Request processing failed");
 
@@ -438,8 +536,62 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
               "Prepared response of %zu bytes:", buf_read_size(&client->send_buf));
         pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->send_buf);
 
+        /*
+         * --reorder: give the next request a short while to arrive, so there is one to answer first.
+         * ponytail: polls every loop pass; the last request of a burst always pays the full wait.
+         */
+        if(client->server->reorder && client->held_size == 0) {
+            client->reorder_deadline_us = util_time_us() + REORDER_WAIT_US;
+            while(socket_recv_frame(fd, &client->recv_buf, modbus_frame_check, NULL) != UTIL_OK
+                  && util_time_us() < client->reorder_deadline_us) {
+                coro_yield(handle, CORO_EVENT_ALWAYS);
+            }
+        }
+
+        /* --reorder: a whole request already waits behind this one, so answer it first. */
+        if(client->server->reorder && client->held_size == 0 && modbus_frame_check(&client->recv_buf, NULL) == UTIL_OK
+           && buf_write_pos(&client->send_buf) <= sizeof(client->held_buffer)) {
+            client->held_size = buf_write_pos(&client->send_buf);
+            memcpy(client->held_buffer, buf_data(&client->send_buf), client->held_size);
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Fault: holding the reply to transaction %u.",
+                  client->mbap_header.transaction_id);
+            memset(&client->timing, 0, sizeof(client->timing));
+            continue;
+        }
+
+        /*
+         * --delay-ms: wait without blocking the other connections.  The protothread keeps no
+         * locals across a yield, so the deadline lives in the client.
+         */
+        if(client->server->delay_us > 0) {
+            client->delay_deadline_us = client->delay_start_us + client->server->delay_us;
+            if(util_mono_us() < client->delay_deadline_us) { coro_wait_until(handle, client->delay_deadline_us); }
+            client->server->delay_applied_us += util_mono_us() - client->delay_start_us;
+            client->server->delay_count++;
+        }
+
+        /* --max-in-flight: this request is unanswered, and so is every whole one queued behind it. */
+        if(client->server->max_in_flight > 0) {
+            (void)socket_recv_buf(fd, &client->recv_buf);
+            check_in_flight(client->server, 1 + frames_waiting(&client->recv_buf));
+        }
+
         /* Capture send start time */
         client->timing.send_start_us = util_time_us();
+
+        /* --close-after-bytes: send only what is left of the allowance, then close mid-response. */
+        client->close_after_send = false;
+        if(client->server->close_after_bytes > 0) {
+            int64_t size = (int64_t)buf_read_size(&client->send_buf);
+            int64_t left = client->server->close_after_bytes - client->bytes_sent;
+
+            if(size >= left) {
+                (void)buf_cut(&client->send_buf, (size_t)left, (size_t)(size - left));
+                client->close_after_send = true;
+            }
+
+            client->bytes_sent += (size < left) ? size : left;
+        }
 
         /* Send response */
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
@@ -447,6 +599,30 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
             break;
+        }
+
+        if(client->close_after_send) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Fault: closing the connection after %" PRId64 " bytes sent.",
+                  client->bytes_sent);
+
+            /* shut only the send side and read on: closing with requests unread resets the connection,
+             * and Windows then throws away the replies the client has not read yet. */
+            shutdown(fd, SHUT_WR);
+            client->draining = true;
+            continue;
+        }
+
+        /* the reply held back for --reorder goes out after the one that overtook it. */
+        if(client->held_size > 0) {
+            buf_reset(&client->send_buf);
+            buf_write_bytes(&client->send_buf, "held_reply", client->held_buffer, client->held_size);
+            client->held_size = 0;
+
+            while((err = socket_send_buf(fd, &client->send_buf)) == UTIL_EAGAIN) { coro_yield(handle, CORO_EVENT_WRITE); }
+            if(err != UTIL_OK) {
+                pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send held response: %s", util_err_str(err));
+                break;
+            }
         }
 
         /* Capture send complete time and calculate statistics */
@@ -527,6 +703,15 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
             break;
         }
 
+        /* --startup-close-ms: a PLC still starting up takes the connection and drops it. */
+        if(util_time_us() < listener->server->start_time_us + listener->server->startup_close_ms * 1000) {
+            pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Fault: closing the connection at once, %" PRId64
+                  "ms of --startup-close-ms left.",
+                  (listener->server->start_time_us + listener->server->startup_close_ms * 1000 - util_time_us()) / 1000);
+            CS_CLOSE(client_fd);
+            continue;
+        }
+
         char client_ip[INET6_ADDRSTRLEN];
         socket_address_get_addr_str(&client_addr, client_ip, sizeof(client_ip));
         uint16_t client_port = socket_address_get_port(&client_addr);
@@ -566,6 +751,18 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
     free(listener);
 
     CORO_END(handle);
+}
+
+
+/* the flag table prints each option; this adds what it cannot: defaults, value forms and examples. */
+static void print_usage_notes(void) {
+    printf("\n"
+           "Defaults: --listen=127.0.0.1:502, --debug=INFO, 1000 of each coil and register type.\n"
+           "Fault options are off when 0 or not given.\n"
+           "Boolean options take a value: --reorder=true, --help=true.\n"
+           "\n"
+           "Examples: modbus_server --listen=0.0.0.0:5020 --holding-registers=5000\n"
+           "          modbus_server --listen=127.0.0.1:5020 --delay-ms=0.5 --max-in-flight=4\n");
 }
 
 
@@ -629,6 +826,55 @@ int main(int argc, char *argv[]) {
          "modbus.input_registers",
          "Number of input registers",
          {.has_default = true, .value.int_val = 1000}},
+        {"reorder",
+         ARGS_TYPE_BOOL,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.reorder",
+         "Answer a pipelined request before the one ahead of it",
+         {.has_default = true, .value.bool_val = false}},
+        {"delay-ms",
+         ARGS_TYPE_FLOAT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.delay_ms",
+         "Delay every response by this many milliseconds after its request arrives; fractions allowed",
+         {.has_default = true, .value.float_val = 0.0}},
+        {"close-every",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.close_every",
+         "Close the connection without answering on every Nth request (0 = never)",
+         {.has_default = true, .value.int_val = 0}},
+        {"startup-close-ms",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.startup_close_ms",
+         "For this many milliseconds after startup, accept every connection and close it at once, as some PLCs do while they start up (0 = never)",
+         {.has_default = true, .value.int_val = 0}},
+        {"close-after-bytes",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.close_after_bytes",
+         "Send this many bytes on each connection, cutting a response short if needed, then close it (0 = never)",
+         {.has_default = true, .value.int_val = 0}},
+        {"random-fill",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "modbus.random_fill",
+         "Start every coil and register with pseudo-random values from this seed, to find tests that expect zeros (0 = off)",
+         {.has_default = true, .value.int_val = 0}},
+        {"max-in-flight",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.max_in_flight",
+         "Log a warning when more than this many requests are unanswered at once (0 = off)",
+         {.has_default = true, .value.int_val = 0}},
         {"help",
          ARGS_TYPE_BOOL,
          ARGS_OPTIONAL,
@@ -643,12 +889,14 @@ int main(int argc, char *argv[]) {
     if(parse_rc != UTIL_OK) {
         pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to parse arguments: %s", args_get_error_detail(&args_result));
         args_print_help(argv[0], flags, num_flags);
+        print_usage_notes();
         args_free(&args_result);
         return EXIT_FAILURE;
     }
 
     if(args_get_bool(&args_result, "help")) {
         args_print_help(argv[0], flags, num_flags);
+        print_usage_notes();
         args_free(&args_result);
         return EXIT_SUCCESS;
     }
@@ -691,6 +939,32 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     server.storage = temp_storage;
+
+    if(args_get_int(&args_result, "random-fill") != 0) {
+        uint32_t state = (uint32_t)args_get_int(&args_result, "random-fill");
+
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Filling coils and registers with pseudo-random values from seed %u.",
+              (unsigned int)state);
+        if(temp_storage->coils) { fill_random(temp_storage->coils->bytes, temp_storage->coils->byte_count, &state); }
+        if(temp_storage->discrete_inputs) {
+            fill_random(temp_storage->discrete_inputs->bytes, temp_storage->discrete_inputs->byte_count, &state);
+        }
+        fill_random((uint8_t *)temp_storage->holding_registers, temp_storage->num_holding_registers * sizeof(uint16_t), &state);
+        fill_random((uint8_t *)temp_storage->input_registers, temp_storage->num_input_registers * sizeof(uint16_t), &state);
+    }
+    server.reorder = args_get_bool(&args_result, "reorder");
+    server.close_every = args_get_int(&args_result, "close-every");
+    server.close_after_bytes = args_get_int(&args_result, "close-after-bytes");
+    server.startup_close_ms = args_get_int(&args_result, "startup-close-ms");
+    server.max_in_flight = args_get_int(&args_result, "max-in-flight");
+
+    double delay_ms = args_get_float(&args_result, "delay-ms");
+    if(!(delay_ms >= 0.0 && delay_ms <= 3600000.0)) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "The response delay must be from 0 to 3600000 milliseconds.");
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+    server.delay_us = (int64_t)((delay_ms * 1000.0) + 0.5);
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server starting");
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Coils: %zu", (size_t)coils_val);
@@ -772,7 +1046,7 @@ int main(int argc, char *argv[]) {
 
         memset(listener_info, 0, sizeof(listener_info_t));
         listener_info->server = &server;
-        strncpy(listener_info->bind_address, addr_str, sizeof(listener_info->bind_address) - 1);
+        snprintf(listener_info->bind_address, sizeof(listener_info->bind_address), "%s", addr_str);
         listener_info->bind_port = port;
 
         coro_task_handle_t listener_handle;
@@ -801,6 +1075,12 @@ int main(int argc, char *argv[]) {
     fflush(stderr);
 
     print_statistics(&server);
+
+    /* Same line as ab_server, so run_perf_compare.py reads both. */
+    if(server.delay_us > 0) {
+        fprintf(stderr, "Response delay: requested %" PRId64 " us, applied mean %" PRId64 " us over %" PRId64 " responses.\n",
+                server.delay_us, (server.delay_count > 0 ? server.delay_applied_us / server.delay_count : 0), server.delay_count);
+    }
 
     fflush(stderr);
 

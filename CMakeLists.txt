@@ -72,7 +72,7 @@ set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
 set(USE_MEM_SANITIZERS 1 CACHE BOOL "Build the client library/tests/tools with memory debug sanitizers (ASan/UBSan/LeakSan) or not")
 set(USE_THREAD_SANITIZERS 0 CACHE BOOL "Build the client library/tests/tools with ThreadSanitizer instead of ASan/UBSan (mutually exclusive)")
 
-# Servers (ab_server, ab_server_fiber, modbus_server*) run as separate processes from the
+# Servers (ab_server, modbus_server) run as separate processes from the
 # client under test, so their sanitizer choice is independent -- e.g. TSan on the client
 # while the server runs plain, to isolate which side a report under CI actually belongs to.
 # Default to matching the client settings so existing builds/CI configs are unaffected.

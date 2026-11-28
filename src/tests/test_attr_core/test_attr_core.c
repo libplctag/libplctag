@@ -37,7 +37,7 @@
  */
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -62,6 +62,23 @@ static void check_get(int32_t tag, const char *attrib, int32_t expected) {
         printf("\tOK: get \"%s\" = %d.\n", attrib, (int)actual);
     } else {
         printf("\tFAIL: get \"%s\" = %d, expected %d.\n", attrib, (int)actual, (int)expected);
+        failures++;
+    }
+}
+
+
+/* a default that only comes back whole if nothing truncates it to 32 bits. */
+#define INT64_SENTINEL ((int64_t)0x123456789ABCDEF)
+
+/* No attribute is 64-bit yet, so every call here must return the default untouched. */
+static void check_get64_refused(int32_t tag, const char *attrib) {
+    int64_t actual = plc_tag_get_int64_attribute(tag, attrib, INT64_SENTINEL);
+
+    if(actual == INT64_SENTINEL) {
+        printf("\tOK: get64 \"%s\" returned the default.\n", attrib ? attrib : "(null)");
+    } else {
+        printf("\tFAIL: get64 \"%s\" = %lld, expected the default %lld.\n", attrib ? attrib : "(null)", (long long)actual,
+               (long long)INT64_SENTINEL);
         failures++;
     }
 }
@@ -182,6 +199,13 @@ static void test_library_scope(void) {
     check_attr_size(0, "version_major", (int32_t)sizeof(int32_t));
     check_attr_size(0, "boodleflokker", PLCTAG_ERR_UNSUPPORTED);
 
+    printf("The 64-bit getter refuses 32-bit and unknown library attributes.\n");
+
+    check_get64_refused(0, "version_major");
+    check_get64_refused(0, "boodleflokker");
+    check_get64_refused(0, "");
+    check_get64_refused(0, NULL);
+
     printf("A tag attribute is not a library attribute.\n");
 
     check_get(0, "size", INT_MIN);
@@ -207,10 +231,16 @@ int main(void) {
 
     tag = open_tag(DEFAULT_TAG);
 
-    printf("Read-only core attributes.\n");
+    printf("size round trips at runtime.\n");
 
     /* the tag is a single DINT element. */
     check_get(tag, "size", 4);
+    check_set(tag, "size", 8, PLCTAG_STATUS_OK);
+    check_get(tag, "size", 8);
+    check_set(tag, "size", 4, PLCTAG_STATUS_OK);
+    check_get(tag, "size", 4);
+
+    printf("Read-only core attributes.\n");
 
     /* not a bit tag, so the bit number is zero. */
     check_get(tag, "bit_num", 0);
@@ -220,7 +250,6 @@ int main(void) {
 
     printf("Read-only core attributes reject a write.\n");
 
-    check_set(tag, "size", 8, PLCTAG_ERR_UNSUPPORTED);
     check_set(tag, "bit_num", 3, PLCTAG_ERR_UNSUPPORTED);
     check_set(tag, "connection_group_id", 1, PLCTAG_ERR_UNSUPPORTED);
 
@@ -256,6 +285,15 @@ int main(void) {
     /* an unknown name has no size, and a bad argument is rejected before the lookup. */
     check_attr_size(tag, "boodleflokker", PLCTAG_ERR_UNSUPPORTED);
     check_attr_size(tag, "", PLCTAG_ERR_BAD_PARAM);
+
+    printf("The 64-bit getter refuses 32-bit, byte and unknown tag attributes.\n");
+
+    check_get64_refused(tag, "read_cache_ms");
+    check_get64_refused(tag, "size");
+    check_get64_refused(tag, "int32_byte_order");
+    check_get64_refused(tag, "boodleflokker");
+    check_get64_refused(tag, "");
+    check_get64_refused(-1, "read_cache_ms");
 
     printf("Creation-time values are readable and read-only.\n");
 
@@ -319,6 +357,36 @@ int main(void) {
     check_set(tag, "boodleflokker", 1, PLCTAG_ERR_UNSUPPORTED);
 
     plc_tag_destroy(tag);
+
+    printf("write_pad_alignment_bytes is set in the tag string and read back.\n");
+
+    {
+        char pad_tag_string[512] = {0};
+        int32_t pad_tag = 0;
+
+        /* ControlLogix does not pad by default. */
+        tag = open_tag(DEFAULT_TAG);
+        check_get(tag, "write_pad_alignment_bytes", 1);
+        check_set(tag, "write_pad_alignment_bytes", 2, PLCTAG_ERR_UNSUPPORTED);
+        plc_tag_destroy(tag);
+
+        compat_snprintf(pad_tag_string, sizeof(pad_tag_string), "%s&write_pad_alignment_bytes=2", DEFAULT_TAG);
+        tag = open_tag(pad_tag_string);
+        check_get(tag, "write_pad_alignment_bytes", 2);
+        plc_tag_destroy(tag);
+
+        /* only 1, 2 and 4 are valid. */
+        compat_snprintf(pad_tag_string, sizeof(pad_tag_string), "%s&write_pad_alignment_bytes=3", DEFAULT_TAG);
+        pad_tag = plc_tag_create(pad_tag_string, DATA_TIMEOUT);
+        if(pad_tag != PLCTAG_ERR_BAD_PARAM) {
+            printf("\tFAIL: write_pad_alignment_bytes=3 created with %s, expected PLCTAG_ERR_BAD_PARAM.\n",
+                   plc_tag_decode_error(pad_tag));
+            failures++;
+            if(pad_tag >= 0) { plc_tag_destroy(pad_tag); }
+        } else {
+            printf("\tOK: write_pad_alignment_bytes=3 is rejected.\n");
+        }
+    }
 
     printf("bit_num reflects the bit the tag was created with.\n");
 

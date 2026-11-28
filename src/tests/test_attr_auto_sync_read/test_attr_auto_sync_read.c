@@ -35,11 +35,11 @@
  * Verify auto_sync_read_ms takes effect when set at runtime, not just in the tag string.
  *
  * Automatic reads start off; a callback counts completions over WINDOW_MS.  The bounds are
- * wide: the window includes network round trips and the tickler's scan interval.
+ * wide: the window includes network round trips.
  */
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>

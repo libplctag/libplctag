@@ -1,0 +1,15 @@
+Host: Dell Inc. Precision Tower 3420
+CPU:  Intel(R) Core(TM) i5-6500 CPU @ 3.20GHz (4 cores, 2600.003 MHz)
+RAM:  31 GB
+OS:   Linux x86_64 (7.1.3+deb14-amd64)
+---
+os=Linux
+arch=x86_64
+kernel=7.1.3+deb14-amd64
+hostname=dell-tower
+manufacturer=Dell Inc.
+product=Precision Tower 3420
+cpu_model=Intel(R) Core(TM) i5-6500 CPU @ 3.20GHz
+cpu_count=4
+cpu_freq=2600.003 MHz
+ram=31 GB

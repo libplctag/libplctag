@@ -34,96 +34,54 @@
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
 
-/* This is all cobbled together from many Internet sources such as
- * GitHub, StackExchange, Microsoft's site etc.
- *
- * WARNING: The use of volatile when C11 atomics are not present
- * _might_ not work on your CPU architecture.  Only some architectures
- * promise atomic reads and writes of data.   Those include all x86 and
- * ARM systems.  Possibly Power too.  YMMV.
+#if defined(_MSC_VER)
+
+#    define WIN32_LEAN_AND_MEAN
+#    include <windows.h>
+
+/*
+ * Every access goes through an Interlocked call, loads included: a plain access is not atomic
+ * for 64-bit values on 32-bit Windows, and a plain read-then-write is not an exchange (U1).
+ * InterlockedCompareExchange(a, 0, 0) is the atomic load.
  */
 
-#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
+void atomic_init_bool(atomic_bool *a, bool new_val) { *a = (long)new_val; }
 
-#    ifdef _WIN32
-#        define WIN32_LEAN_AND_MEAN
-#        include <windows.h>
-#    endif
+bool atomic_get_bool(atomic_bool *a) { return InterlockedCompareExchange(a, 0, 0) != 0; }
 
-void atomic_init_bool(atomic_bool *a, bool new_val) { *a = new_val; }
+bool atomic_set_bool(atomic_bool *a, bool new_val) { return InterlockedExchange(a, (long)new_val) != 0; }
 
-bool atomic_get_bool(atomic_bool *a) { return *a; }
-
-bool atomic_set_bool(atomic_bool *a, bool new_val) {
-    bool old = *a;
-    *a = new_val;
-    return old;
-}
-
+/* returns the original value, like every compare-and-set here. */
 bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val) {
-#    ifdef _WIN32
-    /* Windows does not have a native single byte atomic */
-    return InterlockedCompareExchange16(a, new_val, old_val) == old_val;
-#    else
-    bool expected = old_val;
-    return __atomic_compare_exchange_n(a, &expected, new_val, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-#    endif
+    return InterlockedCompareExchange(a, (long)new_val, (long)old_val) != 0;
 }
 
 void atomic_init_int32(atomic_int32_t *a, int32_t new_val) { *a = new_val; }
 
-int32_t atomic_get_int32(atomic_int32_t *a) { return *a; }
+int32_t atomic_get_int32(atomic_int32_t *a) { return (int32_t)InterlockedCompareExchange((volatile LONG *)a, 0, 0); }
 
 int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val) {
-    int32_t old = *a;
-    *a = new_val;
-    return old;
+    return (int32_t)InterlockedExchange((volatile LONG *)a, (LONG)new_val);
 }
 
 int32_t atomic_add_int32(atomic_int32_t *a, int32_t other) {
-#    ifdef _WIN32
-    return InterlockedExchangeAdd((LONG *)a, other);
-#    else
-    return __atomic_fetch_add(a, other, __ATOMIC_SEQ_CST);
-#    endif
+    return (int32_t)InterlockedExchangeAdd((volatile LONG *)a, (LONG)other);
 }
 
 int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val) {
-#    ifdef _WIN32
-    return InterlockedCompareExchange((LONG *)a, new_val, old_val);
-#    else
-    int32_t expected = old_val;
-    __atomic_compare_exchange_n(a, &expected, new_val, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-    return expected;
-#    endif
+    return (int32_t)InterlockedCompareExchange((volatile LONG *)a, (LONG)new_val, (LONG)old_val);
 }
 
 void atomic_init_int64(atomic_int64_t *a, int64_t new_val) { *a = new_val; }
 
-int64_t atomic_get_int64(atomic_int64_t *a) { return *a; }
+int64_t atomic_get_int64(atomic_int64_t *a) { return InterlockedCompareExchange64((volatile LONGLONG *)a, 0, 0); }
 
-int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val) {
-    int64_t old = *a;
-    *a = new_val;
-    return old;
-}
+int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val) { return InterlockedExchange64((volatile LONGLONG *)a, new_val); }
 
-int64_t atomic_add_int64(atomic_int64_t *a, int64_t other) {
-#    ifdef _WIN32
-    return InterlockedExchangeAdd64((LONGLONG *)a, other);
-#    else
-    return __atomic_fetch_add(a, other, __ATOMIC_SEQ_CST);
-#    endif
-}
+int64_t atomic_add_int64(atomic_int64_t *a, int64_t other) { return InterlockedExchangeAdd64((volatile LONGLONG *)a, other); }
 
 int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val) {
-#    ifdef _WIN32
-    return InterlockedCompareExchange64((LONGLONG *)a, new_val, old_val);
-#    else
-    int64_t expected = old_val;
-    __atomic_compare_exchange_n(a, &expected, new_val, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-    return expected;
-#    endif
+    return InterlockedCompareExchange64((volatile LONGLONG *)a, new_val, old_val);
 }
 
 #else

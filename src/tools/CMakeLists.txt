@@ -8,7 +8,6 @@ endif()
 
 # Build tool executables
 add_subdirectory("ab_server")
-add_subdirectory("tag_rw_deprecated")
 add_subdirectory("tag_rw2")
 add_subdirectory("list_tags_logix")
 add_subdirectory("list_tags_micro8x0")

@@ -4,7 +4,7 @@
 #include "./getline.h"
 #include <ctype.h>
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -474,7 +474,8 @@ int check_tags(void) {
         rc = plc_tag_status(t->tag_handle);
 
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "(%d) TAG STATUS NOT OK! Tag Status: %s.", t->tag_handle, plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "(%d) TAG STATUS NOT OK! Tag Status: %s.", t->tag_handle,
+                   plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -514,8 +515,8 @@ int process_tags(void) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "%s", tag_path);
         int tag_handle = plc_tag_create(tag_path, 0);
         if(tag_handle < 0) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Error, %s, creating tag %s with string %s!", plc_tag_decode_error(tag_handle), tag.key,
-                   tag_path);
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Error, %s, creating tag %s with string %s!",
+                   plc_tag_decode_error(tag_handle), tag.key, tag_path);
             free(tag_path);
             free(line);
             return -1;
@@ -892,13 +893,18 @@ void tag_callback(int32_t tag_handle, int event, int status) {
 
     /* handle the events. */
     switch(event) {
-        case PLCTAG_EVENT_ABORTED: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag operation was aborted!", t->tag.key); break;
+        case PLCTAG_EVENT_ABORTED:
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag operation was aborted!", t->tag.key);
+            break;
         case PLCTAG_EVENT_DESTROYED: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag was destroyed.", t->tag.key); break;
         case PLCTAG_EVENT_READ_COMPLETED:
             get_tag(tag_handle, &t->tag);
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag read operation completed with status %s.", t->tag.key, plc_tag_decode_error(status));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag read operation completed with status %s.", t->tag.key,
+                   plc_tag_decode_error(status));
             break;
-        case PLCTAG_EVENT_READ_STARTED: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag read operation started.", t->tag.key); break;
+        case PLCTAG_EVENT_READ_STARTED:
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag read operation started.", t->tag.key);
+            break;
         case PLCTAG_EVENT_WRITE_COMPLETED: break;
         case PLCTAG_EVENT_WRITE_STARTED: break;
         default: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Unexpected event %d!", t->tag.key, event); break;

@@ -43,7 +43,11 @@
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
+    /* the modulo below divides by this, and the other platforms already guard it. */
+    if(upper_bound == 0) { return 0; }
+
     arc4random_buf(&random_number, sizeof(random_number));
+
     random_number %= upper_bound;
 
     return random_number;
@@ -77,15 +81,25 @@ uint64_t random_u64(uint64_t upper_bound) {
 #    include <wincrypt.h>
 
 #    include <bcrypt.h> /* for BCryptGenRandom() */
+#    include <stdlib.h> /* for srand()/rand() in the fallback path */
 
 
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
-    if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
-        return RANDOM_U64_ERROR;
-    }
     if(upper_bound == 0) { return 0; }
+
+    if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+        /*
+         * Fall back the same way the Linux branch does rather than returning a sentinel.
+         * The sentinel was UINT64_MAX, which is outside the [0, upper_bound) range this
+         * function promises, so a caller that used the result arithmetically -- as the
+         * connection backoff does -- silently got a wild value instead of an error.
+         */
+        srand((unsigned int)((uint64_t)time(NULL) ^ random_number));
+        for(size_t i = 0; i < sizeof(random_number); ++i) { ((uint8_t *)&random_number)[i] ^= (uint8_t)(rand() % 256); }
+    }
+
     random_number %= upper_bound;
 
     return random_number;

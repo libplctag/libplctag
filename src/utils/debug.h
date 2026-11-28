@@ -42,7 +42,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
+#include <utils/atomic_utils.h>
 
 /* Generated debug constants - parsed from libplctag.h at build time */
 #include "debug_generated.h"
@@ -54,12 +55,18 @@ extern int get_debug_level(void);
 /* Module configuration API */
 extern void debug_module_set_level(debug_module_t module, int level);
 extern int debug_module_get_level(debug_module_t module);
-extern void debug_set_all_modules(int level);
 
 extern bool debug_is_enabled(debug_module_t module, int level);
 
+/* lets GCC and Clang check every log call's format string against its arguments. */
+#if defined(__GNUC__)
+#    define PDEBUG_FORMAT_ATTR __attribute__((format(printf, 6, 7)))
+#else
+#    define PDEBUG_FORMAT_ATTR
+#endif
+
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
-                        ...);
+                        ...) PDEBUG_FORMAT_ATTR;
 
 #if defined(_WIN32) && defined(_MSC_VER)
 /* MinGW on Windows does not need this. */
@@ -71,10 +78,33 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 #    define PLCTAG_COMPILE_DEBUG_LEVEL PLCTAG_DEBUG_DETAIL
 #endif
 
+/*
+ * OR DEBUG_RATE_LIMIT into the level of a message that can repeat on every packet or every read,
+ * such as DEBUG_WARN | DEBUG_RATE_LIMIT. That call site then prints the first time and at most
+ * once per DEBUG_LIMIT_MS after, with a count of what it dropped. The call site is the key, so
+ * the same message with different values counts as one. Messages without the flag always print.
+ */
+#define DEBUG_RATE_LIMIT (0x100)
+#define DEBUG_LIMIT_MS (5000)
+
+typedef struct {
+    atomic_int64_t next_ms;
+    atomic_int32_t suppressed;
+} debug_limit_t;
+
+extern bool debug_limit_pass(debug_limit_t *limit, const char *func, int line_num, int debug_level, debug_module_t module,
+                             int32_t tag_id);
+
 #define pdebug(module, dbg, tag_id, ...)                                                                                       \
     do {                                                                                                                       \
-        if((dbg) <= PLCTAG_COMPILE_DEBUG_LEVEL) {                                                                              \
-            if(debug_is_enabled((module), (dbg))) { pdebug_impl(__func__, __LINE__, (dbg), (module), (tag_id), __VA_ARGS__); } \
+        if(((dbg) & ~DEBUG_RATE_LIMIT) <= PLCTAG_COMPILE_DEBUG_LEVEL) {                                                        \
+            if(debug_is_enabled((module), ((dbg) & ~DEBUG_RATE_LIMIT))) {                                                      \
+                static debug_limit_t pdebug_limit_;                                                                            \
+                if(!((dbg) & DEBUG_RATE_LIMIT)                                                                                 \
+                   || debug_limit_pass(&pdebug_limit_, __func__, __LINE__, ((dbg) & ~DEBUG_RATE_LIMIT), (module), (tag_id))) { \
+                    pdebug_impl(__func__, __LINE__, ((dbg) & ~DEBUG_RATE_LIMIT), (module), (tag_id), __VA_ARGS__);             \
+                }                                                                                                              \
+            }                                                                                                                  \
         }                                                                                                                      \
     } while(0)
 

@@ -47,6 +47,11 @@ extern int util_set_interrupt_handler(void (*handler)(void));
  */
 extern void util_sleep_ms(int ms);
 
+/**
+ * @brief Microseconds on a monotonic clock, for deadlines only: not a date.
+ */
+extern int64_t util_mono_us(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,16 +1,16 @@
 message("Building libplctag library.")
 
 # generate version file from CMake info.
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h.in" "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_LIST_DIR}/lib/version.h.in" "${CMAKE_CURRENT_LIST_DIR}/lib/version.h" @ONLY)
 
 # Parse libplctag.h to generate internal debug constants
 # This creates add_custom_command for debug_generated.h and debug_module_names.c
 # The .c file is included in libplctag_SRCS below, so CMake tracks the dependency automatically
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ParseLibplctagHeader.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/ParseLibplctagHeader.cmake")
 parse_libplctag_header(
-    "${CMAKE_CURRENT_SOURCE_DIR}/api/libplctag.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_generated.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_module_names.c"
+    "${CMAKE_CURRENT_LIST_DIR}/lib/libplctag.h"
+    "${CMAKE_CURRENT_LIST_DIR}/../utils/debug_generated.h"
+    "${CMAKE_CURRENT_LIST_DIR}/../utils/debug_module_names.c"
 )
 # DEBUG_GENERATED_NAMES_C is now set and used in libplctag_SRCS
 
@@ -29,55 +29,24 @@ endif()
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
 message("Adding AB protocol sources to build.")
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/modules/ab")
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/protocols/ab")
 
 # set up the library sources
-set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/api/libplctag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/api/lib.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/error_codes.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/error_codes.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/path.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/conn.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/conn.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/path.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/wire.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/conn_watch.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/connection_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/connection_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/conn_watch.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_registry.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_registry.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_string.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_string.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/api/tag_attribs.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_common.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_common.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_connection_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_connection_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/cip.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/cip.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/conn.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/conn.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/defs.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_raw_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_raw_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_standard_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_standard_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/modbus/modbus.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/modbus/modbus.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/system/system.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/system/system.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/system/tag.h"
+set ( libplctag_SRCS "${CMAKE_CURRENT_LIST_DIR}/lib/init.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/init.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/conn_stats.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/conn_stats.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/libplctag.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/lib.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/tag.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/tag_attribs.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/version.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/version.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/protocols/mb/modbus.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/protocols/mb/modbus.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/protocols/system/system.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/protocols/system/system.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/protocols/system/tag.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/atomic_utils.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/atomic_utils.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/attr.c"
@@ -85,18 +54,23 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/byteorder.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/debug.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/debug.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_module_names.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/debug_module_names.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hash.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hash.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hashtable.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hashtable.h"
+#                    "${CMAKE_CURRENT_LIST_DIR}/../utils/macros.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/random_utils.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/random_utils.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/rc.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/rc.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/backoff.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/backoff.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/time_utils.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/time_utils.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/../platform/platform_common.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../platform/platform_common.c"
                      "${PLATFORM_SHIM_PATH}/platform.c"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
 
@@ -123,6 +97,13 @@ endmacro()
 # Debugging
 # print_all_ar_link_variables()
 
+# libatomic only where 64-bit atomics need it.  Linking it anyway breaks musl-gcc binaries on
+# hosts with no musl libatomic.so.1.
+include(CheckCSourceCompiles)
+check_c_source_compiles("#include <stdatomic.h>
+#include <stdint.h>
+int main(void) { _Atomic int64_t x = 0; return (int)atomic_fetch_add(&x, 1); }" PLCTAG_ATOMICS_WITHOUT_LIB)
+
 # shared library
 # Note: No add_dependencies needed - DEBUG_GENERATED_NAMES_C in sources triggers generation automatically
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
@@ -130,7 +111,9 @@ target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
 # Link atomic library for 64-bit atomic operations on 32-bit ARM
 # Link math library (main library may use sqrt in some places)
 if(UNIX AND NOT APPLE)
-    target_link_libraries(plctag_dyn atomic)
+    if(NOT PLCTAG_ATOMICS_WITHOUT_LIB)
+        target_link_libraries(plctag_dyn atomic)
+    endif()
     target_link_libraries(plctag_dyn m)
 elseif(UNIX)
     # macOS: link math library
@@ -168,7 +151,9 @@ target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
 # Link atomic library for 64-bit atomic operations on 32-bit ARM
 # Link math library (main library may use sqrt in some places)
 if(UNIX AND NOT APPLE)
-    target_link_libraries(plctag_static atomic)
+    if(NOT PLCTAG_ATOMICS_WITHOUT_LIB)
+        target_link_libraries(plctag_static atomic)
+    endif()
     target_link_libraries(plctag_static m)
 elseif(UNIX)
     # macOS: link math library
@@ -193,13 +178,13 @@ if(LIBPLCTAG_ENABLE_COVERAGE)
 endif()
 
 # make sure the .h file is in the output directory
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/api/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_LIST_DIR}/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
 
 install(TARGETS plctag_static
     ARCHIVE DESTINATION lib${LIB_SUFFIX}
     COMPONENT devel)
 
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/api/libplctag.h"
+install(FILES "${CMAKE_CURRENT_LIST_DIR}/lib/libplctag.h"
     DESTINATION include
     COMPONENT devel)
 

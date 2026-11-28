@@ -46,7 +46,7 @@
 
 #include "mini_mock.h"
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -156,8 +156,8 @@ static void test_zero_elem_count_rejected(void **state) {
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_long_numeric_segments_rejected), cmocka_unit_test(test_long_symbolic_segments_rejected),
-        cmocka_unit_test(test_oversized_array_index_rejected),  cmocka_unit_test(test_large_valid_index_accepted),
-        cmocka_unit_test(test_normal_name_accepted),            cmocka_unit_test(test_zero_elem_count_rejected),
+        cmocka_unit_test(test_oversized_array_index_rejected), cmocka_unit_test(test_large_valid_index_accepted),
+        cmocka_unit_test(test_normal_name_accepted),           cmocka_unit_test(test_zero_elem_count_rejected),
     };
 
     int rc = cmocka_run_group_tests(tests, NULL, NULL);

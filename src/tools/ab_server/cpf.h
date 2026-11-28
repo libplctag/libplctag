@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,10 +33,14 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
 #include "plc.h"
-#include "slice.h"
+#include <stdint.h>
+#include <utils/byte_slice.h>
 
-extern slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc);
-extern slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc);
+/*
+ * The CPF payload of SendRRData (unconnected) and SendUnitData (connected).  Each writes the
+ * reply into out and returns what is left of it.  On failure it sets *eip_status to the ODVA
+ * code and returns out untouched.
+ */
+extern byte_slice_t handle_cpf_unconnected(byte_slice_t in, byte_slice_t out, plc_s *plc, uint32_t *eip_status);
+extern byte_slice_t handle_cpf_connected(byte_slice_t in, byte_slice_t out, plc_s *plc, uint32_t *eip_status);

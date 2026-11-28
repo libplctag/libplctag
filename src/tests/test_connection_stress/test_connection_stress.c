@@ -47,7 +47,7 @@
 
 #include "compat_utils.h"
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,7 +70,8 @@
 
 void usage(void) {
     // NOLINTNEXTLINE
-    fprintf(stderr,
+    fprintf(
+        stderr,
         "Usage:\n"
         "  test_connection_stress [--num-threads=N] [--tag=TAG_STRING]\n"
         "  test_connection_stress <num_threads> <tag_string>  (legacy format)\n"

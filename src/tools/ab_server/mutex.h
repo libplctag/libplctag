@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -32,31 +34,15 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
+#include <stdint.h>
 #include "compat.h"
 
-/* Derived from PLCTAG_STATUS_OK et al. */
-typedef enum {
-    MUTEX_STATUS_OK = 0,
-    MUTEX_ERR_NULL_PTR = -25,
-    MUTEX_ERR_MUTEX_DESTROY = -14,
-    MUTEX_ERR_MUTEX_INIT = -15,
-    MUTEX_ERR_MUTEX_LOCK = -16,
-    MUTEX_ERR_MUTEX_UNLOCK = -17
-} mutex_err_t;
-
-/* mutex functions/defs */
+/* Functions return PLCTAG_STATUS_OK or a PLCTAG_ERR_* code from libplctag.h. */
 typedef struct mutex_t *mutex_p;
-extern int mutex_create(mutex_p *m);
-// extern int mutex_lock(mutex_p m);
-// extern int mutex_try_lock(mutex_p m);
-// extern int mutex_unlock(mutex_p m);
-extern int mutex_destroy(mutex_p *m);
+extern int32_t mutex_create(mutex_p *m);
 
-extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
-extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
-extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
+extern int32_t mutex_lock_impl(const char *func, int32_t line_num, mutex_p m);
+extern int32_t mutex_unlock_impl(const char *func, int32_t line_num, mutex_p m);
 
 #if defined(IS_WINDOWS) && defined(IS_MSVC)
 /* MinGW on Windows does not need this. */
@@ -64,10 +50,7 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 #endif
 
 #define mutex_lock(m) mutex_lock_impl(__func__, __LINE__, m)
-#define mutex_try_lock(m) mutex_try_lock_impl(__func__, __LINE__, m)
 #define mutex_unlock(m) mutex_unlock_impl(__func__, __LINE__, m)
-
-/* macros are evil */
 
 /*
  * Use this one like this:
@@ -79,29 +62,16 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
  *
  * The macro locks and unlocks for you.  Derived from ideas/code on StackOverflow.com.
  *
- * Do not use break, return, goto or continue inside the synchronized block if
- * you intend to have them apply to a loop outside the synchronized block.
- *
- * You can use break, but it will drop out of the inner for loop and correctly
- * unlock the mutex.  It will NOT break out of any surrounding loop outside the
- * synchronized block.
+ * Do not use return, goto or continue inside the block: they skip the unlock.
+ * break leaves the block and unlocks, but does not leave any surrounding loop.
+ * The lock result is compared to 0, which is PLCTAG_STATUS_OK.
  */
+#define CRITICAL_CAT2(a, b) a##b
+#define CRITICAL_CAT(a, b) CRITICAL_CAT2(a, b)
+#define LINE_ID(base) CRITICAL_CAT(base, __LINE__)
 
-#if IS_WINDOWS
-#    define PLCTAG_CAT2(a, b) a##b
-#    define PLCTAG_CAT(a, b) PLCTAG_CAT2(a, b)
-#    define LINE_ID(base) PLCTAG_CAT(base, __LINE__)
-
-#    define critical_block(lock)                                                \
-        for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); \
-            LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))               \
-            for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock);              \
-                LINE_ID(__sync_rc_nargle_) == MUTEX_STATUS_OK && LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0)
-#else
-#    define critical_block(lock)                                                                 \
-        for(int __sync_flag_nargle_##__LINE__ = 1; __sync_flag_nargle_##__LINE__;                \
-            __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))                               \
-            for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock);                              \
-                __sync_rc_nargle_##__LINE__ == MUTEX_STATUS_OK && __sync_flag_nargle_##__LINE__; \
-                __sync_flag_nargle_##__LINE__ = 0)
-#endif
+#define critical_block(lock)                                                    \
+    for(int32_t LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); \
+        LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))                   \
+        for(int32_t LINE_ID(__sync_rc_nargle_) = mutex_lock(lock);              \
+            LINE_ID(__sync_rc_nargle_) == 0 && LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0)

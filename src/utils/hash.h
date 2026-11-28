@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,18 +33,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
-/*
- * This comes from Bob Jenkins's excellent site:
- *    http://burtleburtle.net/bob/c/lookup2.c
- * Thanks, Bob!
- *
- * Note that I am intentionally using lookup2.c not the newer lookup3.c
- * because of the byte order handling in lookup3.c.   I just cannot
- * convince myself that it is going to be correct on all platforms.
- */
-
+#include <stddef.h>
 #include <stdint.h>
 
-extern uint32_t hash(uint8_t *k, size_t length, uint32_t initval);
+/* FNV-1a, 64 bits. */
+extern uint64_t hash64(const uint8_t *k, size_t length);

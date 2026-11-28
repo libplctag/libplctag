@@ -35,13 +35,12 @@
 
 #include <stdint.h>
 
-#define RANDOM_U64_ERROR (UINT64_MAX)
-
 /**
  * @brief Generates a random number between 0 (inclusive) and upper_bound (exclusive).
  *
  * The generation uses a relatively good (crypto secure?) platform-dependent function
- * to make the random number.
+ * to make the random number.  Every platform falls back to a weaker source rather than
+ * failing, so the result is always in range.  An upper bound of zero returns zero.
  *
  * @param upper_bound The upper bound (exclusive) of the random number.
  * @return uint64_t A random number in the specified range.

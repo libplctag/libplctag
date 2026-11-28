@@ -33,11 +33,13 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 
 typedef struct attr_entry_t *attr_entry;
 typedef struct attr_t *attr;
 
-attr_entry find_entry(attr a, const char *name);
 extern attr attr_create(void);
 extern attr attr_create_from_str(const char *attr_str);
 extern int attr_set_str(attr attrs, const char *name, const char *val);
@@ -45,3 +47,30 @@ extern int attr_set_int(attr attrs, const char *name, int val);
 extern const char *attr_get_str(attr attrs, const char *name, const char *def);
 extern int attr_get_int(attr attrs, const char *name, int def);
 extern void attr_destroy(attr attrs);
+
+/* A deep copy, for a holder that has to outlive the set it was given.  NULL on failure. */
+extern attr attr_copy(attr src);
+
+/* the largest attribute name, terminator included, that a lookup canonicalizes on the stack. */
+#define ATTR_NAME_MAX_SIZE (64)
+
+/*
+ * The canonical form of an attribute name: ASCII 'A'-'Z' lowercased and '_' removed, every
+ * other byte unchanged.  Names are stored and looked up in this form, so "elem_count",
+ * "ElemCount" and "ELEM_COUNT" are one name and comparisons are exact.
+ *
+ * Byte-wise on purpose: no locale and no UTF-8 decoding, so no non-ASCII byte sequence (an
+ * overlong UTF-8 form, a Unicode case fold) can turn into an ASCII name.  The result is never
+ * longer than the input, so dst may be name.
+ *
+ * Returns the length, PLCTAG_ERR_NULL_PTR, or PLCTAG_ERR_TOO_SMALL if dst_size cannot hold
+ * the result and its terminator.
+ */
+extern int32_t attr_canonical_name(char *dst, int32_t dst_size, const char *name);
+
+/*
+ * A copy of attr_str with each name trimmed of spaces as attr_create_from_str() trims it and
+ * made canonical, and each value unchanged, in the original order.  The find_or_create_tag
+ * key.  NULL on failure; the caller frees it with mem_free().
+ */
+extern char *attr_canonical_str(const char *attr_str);

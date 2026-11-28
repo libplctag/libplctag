@@ -33,5 +33,4 @@ const char *debug_module_names[] = {
     [24] = "AB_CONNECTION",
     [25] = "MB_CONNECTION",
     [26] = "OMRON_CONNECTION",
-    [27] = "CIP",
 };

@@ -6,6 +6,10 @@
 #include "log.h"
 #include "utils.h"
 
+#ifndef _WIN32
+#    include <sys/select.h>
+#endif
+
 /* Platform detection for BSD-like systems (mirrors socket.c) */
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) \
     || defined(__DragonFly__)
@@ -42,6 +46,7 @@ struct coro_net_t {
     // Hot arrays - rebuild loop (cache-critical)
     socket_t *task_fds;
     short *task_events;
+    int64_t *task_wake_us; /* coro_wait_until() deadline (util_mono_us), 0 for none */
 
     // Warm arrays - dispatch loop
     int *task_lines;
@@ -67,6 +72,7 @@ struct coro_net_t {
 
 
 static void coro_cleanup(coro_net_t **net);
+static void wait_short(coro_pollfd *pfds, size_t nfds, int64_t timeout_us);
 
 #ifdef _WIN32
 /* simulate POSIX socketpair()*/
@@ -159,6 +165,13 @@ util_err_t coro_set_line(coro_task_handle_t task, int line) {
     return UTIL_OK;
 }
 
+void coro_set_wake(coro_task_handle_t task, int64_t deadline_us) {
+    if(!task.coro_net || task.index < 0 || task.index >= (int)task.coro_net->max_tasks) { return; }
+
+    task.coro_net->task_wake_us[task.index] = deadline_us;
+}
+
+
 util_err_t coro_set_task_event(coro_task_handle_t task, short event) {
     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Setting task event: index=%d event=0x%04x", task.index, event);
     if(!task.coro_net || task.index < 0 || task.index >= (int)task.coro_net->max_tasks) { return UTIL_EINVAL; }
@@ -198,6 +211,7 @@ util_err_t coro_create(coro_net_t **out_coro_net, size_t max_tasks) {
     size_t task_fds_size = max_tasks * sizeof(socket_t);
     size_t task_events_size = max_tasks * sizeof(short);
     size_t task_lines_size = max_tasks * sizeof(int);
+    size_t task_wake_size = max_tasks * sizeof(int64_t);
     size_t task_handlers_size = max_tasks * sizeof(void *);
     size_t task_contexts_size = max_tasks * sizeof(void *);
 
@@ -210,6 +224,7 @@ util_err_t coro_create(coro_net_t **out_coro_net, size_t max_tasks) {
     total_size += task_fds_size + align;
     total_size += task_events_size + align;
     total_size += task_lines_size + align;
+    total_size += task_wake_size + align;
     total_size += task_handlers_size + align;
     total_size += task_contexts_size + align;
     total_size += pfds_size + align;
@@ -240,6 +255,10 @@ util_err_t coro_create(coro_net_t **out_coro_net, size_t max_tasks) {
     ptr = ALIGN_PTR(ptr);
     net->task_lines = (int *)ptr;
     ptr += task_lines_size;
+
+    ptr = ALIGN_PTR(ptr);
+    net->task_wake_us = (int64_t *)ptr;
+    ptr += task_wake_size;
 
     ptr = ALIGN_PTR(ptr);
     net->task_handlers = (void (**)(coro_task_handle_t, socket_t, void *))ptr;
@@ -352,6 +371,7 @@ util_err_t coro_add_task(coro_task_handle_t *task, coro_net_t *net, socket_t fd,
             net->task_handlers[i] = handler;
             net->task_contexts[i] = context;
             net->task_events[i] = CORO_EVENT_ALWAYS;
+            net->task_wake_us[i] = 0;
 
             // Construct task handle
             task->coro_net = net;
@@ -383,6 +403,7 @@ void coro_remove_task(coro_task_handle_t task) {
     }
     task.coro_net->task_fds[task.index] = INVALID_SOCKET;
     task.coro_net->task_events[task.index] = CORO_EVENT_NONE;
+    task.coro_net->task_wake_us[task.index] = 0;
     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Removed task with handle index=%d", task.index);
 
     // Wake the loop to update the poll list
@@ -403,6 +424,8 @@ util_err_t coro_run(coro_net_t **net_ptr, uint32_t tick_interval_ms) {
 
     while(net->running) {
         size_t nfds = 0;
+        int64_t next_wake_us = 0; /* earliest coro_wait_until() deadline still ahead, 0 for none */
+        int64_t now_us = util_mono_us();
 
         /* do it here before we continue elsewhere */
         net->iteraction_count++;
@@ -427,12 +450,28 @@ util_err_t coro_run(coro_net_t **net_ptr, uint32_t tick_interval_ms) {
                     continue;
                 }
 
+                /* a task in coro_wait_until() runs again once its deadline passes */
+                if(net->task_wake_us[actual_index] > 0) {
+                    if(net->task_wake_us[actual_index] <= now_us) {
+                        net->task_wake_us[actual_index] = 0;
+                        net->task_events[actual_index] = CORO_EVENT_ALWAYS;
+                    } else if(next_wake_us == 0 || net->task_wake_us[actual_index] < next_wake_us) {
+                        next_wake_us = net->task_wake_us[actual_index];
+                    }
+                }
+
                 /* is it an ALWAYS task with a handler? */
                 if(net->task_events[actual_index] == CORO_EVENT_ALWAYS) {
                     /* we will run these tasks immediately */
                     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Dispatching ALWAYS task immediately: index=%zu", actual_index);
                     coro_task_handle_t task_handle = {.coro_net = net, .index = (int)actual_index};
                     net->task_handlers[actual_index](task_handle, net->task_fds[actual_index], net->task_contexts[actual_index]);
+
+                    /* it may have just started a coro_wait_until() */
+                    if(net->task_wake_us[actual_index] > 0
+                       && (next_wake_us == 0 || net->task_wake_us[actual_index] < next_wake_us)) {
+                        next_wake_us = net->task_wake_us[actual_index];
+                    }
                 }
 
                 /* Add socket tasks to poll array if they have a valid socket and a poll event set */
@@ -468,9 +507,26 @@ util_err_t coro_run(coro_net_t **net_ptr, uint32_t tick_interval_ms) {
             continue;
         }
 
+        /*
+         * Poll no longer than the earliest wake deadline.  poll() counts whole milliseconds, so
+         * the last part of a millisecond is waited out by wait_short(), which still wakes on
+         * socket activity, and the poll then does not wait at all.
+         */
+        int poll_timeout_ms = (int)tick_interval_ms;
+        if(next_wake_us > 0) {
+            int64_t remaining_us = next_wake_us - util_mono_us();
+
+            if(remaining_us < 1000) {
+                wait_short(net->pfds, nfds, remaining_us);
+                poll_timeout_ms = 0;
+            } else if(remaining_us / 1000 < poll_timeout_ms) {
+                poll_timeout_ms = (int)(remaining_us / 1000);
+            }
+        }
+
         // Poll with fixed timeout
         int64_t poll_start = util_time_us();
-        int poll_result = coro_poll(net->pfds, (nfds_t)nfds, (int)tick_interval_ms);
+        int poll_result = coro_poll(net->pfds, (nfds_t)nfds, poll_timeout_ms);
         int64_t poll_time = util_time_us() - poll_start;
 
         if(poll_result < 0) {
@@ -527,6 +583,49 @@ util_err_t coro_run(coro_net_t **net_ptr, uint32_t tick_interval_ms) {
 
     return UTIL_OK;
 }
+
+
+/*
+ * Wait up to timeout_us for activity on the poll set, at microsecond resolution.  select() takes
+ * a timeval where poll() takes milliseconds.
+ */
+#ifdef _WIN32
+static void wait_short(coro_pollfd *pfds, size_t nfds, int64_t timeout_us) {
+    /* ponytail: no microsecond wait here; WSAPoll(1 ms) wakes on activity but overshoots. */
+    (void)coro_poll(pfds, (ULONG)nfds, timeout_us > 0 ? 1 : 0);
+}
+#else
+static void wait_short(coro_pollfd *pfds, size_t nfds, int64_t timeout_us) {
+    fd_set readfds;
+    fd_set writefds;
+    int maxfd = -1;
+    struct timeval tv;
+
+    if(timeout_us <= 0) { return; }
+
+    FD_ZERO(&readfds);
+    FD_ZERO(&writefds);
+
+    for(size_t i = 0; i < nfds; i++) {
+        int fd = (int)pfds[i].fd;
+
+        /* select() cannot take this fd; fall back to a whole-millisecond poll. */
+        if(fd < 0 || fd >= FD_SETSIZE) {
+            (void)poll(pfds, (nfds_t)nfds, 1);
+            return;
+        }
+
+        if(pfds[i].events & POLLIN) { FD_SET(fd, &readfds); }
+        if(pfds[i].events & POLLOUT) { FD_SET(fd, &writefds); }
+        if(fd > maxfd) { maxfd = fd; }
+    }
+
+    tv.tv_sec = (time_t)(timeout_us / 1000000);
+    tv.tv_usec = (suseconds_t)(timeout_us % 1000000);
+
+    (void)select(maxfd + 1, &readfds, &writefds, NULL, &tv);
+}
+#endif
 
 
 void coro_cleanup(coro_net_t **net) {

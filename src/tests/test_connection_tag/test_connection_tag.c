@@ -50,6 +50,13 @@
  *   Point at an unreachable address and verify CONNECTING -> ERR_WAIT.
  *   No simulator needed; run when no server is listening on the target host.
  *
+ * --poll:
+ *   Create one @connection tag with no callback and a timeout of 0, then poll its
+ *   connection_status.  The states seen must follow the expected sequence in order;
+ *   ones too brief for the poll may be missed, but CONNECTING and UP must be seen
+ *   and the last state must be reached.  Run against a server with a response delay
+ *   so CONNECTING lasts long enough to see.
+ *
  * --cycles=N --data-tag=ATTRIBS [--idle-timeout-ms=T]:
  *   Verify N consecutive connect/idle-disconnect cycles.  A data tag on the
  *   same session is read after each IDLE_WAIT to trigger a reconnect.
@@ -84,7 +91,7 @@
  */
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -131,12 +138,13 @@ static bool expect_err = false;
 static int num_cycles = 1;
 static const char *data_tag_attribs = NULL;
 static int idle_timeout_ms = 0;
+static bool poll_mode = false;
 
 /* -------------------------------------------------------------------------
  * Runtime state shared between callback threads and the main thread
  * ---------------------------------------------------------------------- */
 
-static compat_atomic_int32_t running = {1};            /* 1 = keep looping */
+static compat_atomic_int32_t running = {1}; /* 1 = keep looping */
 static compat_atomic_int32_t need_reconnect = {0};
 static compat_atomic_int32_t read_started_count = {0};
 static compat_atomic_int32_t read_completed_count = {0};
@@ -235,8 +243,7 @@ static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
     if(compat_atomic_load_int32(&ts->completed) || compat_atomic_load_int32(&ts->failed)) {
         bool all_done = true;
         for(i = 0; i < num_tags; i++) {
-            if(!compat_atomic_load_int32(&tag_states[i].completed) &&
-               !compat_atomic_load_int32(&tag_states[i].failed)) {
+            if(!compat_atomic_load_int32(&tag_states[i].completed) && !compat_atomic_load_int32(&tag_states[i].failed)) {
                 all_done = false;
                 break;
             }
@@ -260,21 +267,15 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
     if(!ts) { return; }
 
     switch(event) {
-        case PLCTAG_EVENT_CREATED:
-            fprintf(stderr, "[tag %d] CREATED: %s\n", (int)tag_id, plc_tag_decode_error(status));
-            break;
+        case PLCTAG_EVENT_CREATED: fprintf(stderr, "[tag %d] CREATED: %s\n", (int)tag_id, plc_tag_decode_error(status)); break;
 
         case PLCTAG_EVENT_DESTROYED:
             fprintf(stderr, "[tag %d] DESTROYED: %s\n", (int)tag_id, plc_tag_decode_error(status));
             break;
 
-        case PLCTAG_EVENT_ABORTED:
-            fprintf(stderr, "[tag %d] ABORTED: %s\n", (int)tag_id, plc_tag_decode_error(status));
-            break;
+        case PLCTAG_EVENT_ABORTED: fprintf(stderr, "[tag %d] ABORTED: %s\n", (int)tag_id, plc_tag_decode_error(status)); break;
 
-        case PLCTAG_EVENT_READ_STARTED:
-            compat_atomic_inc_int32(&read_started_count);
-            break;
+        case PLCTAG_EVENT_READ_STARTED: compat_atomic_inc_int32(&read_started_count); break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
             rc = compat_atomic_inc_int32(&read_completed_count);
@@ -285,9 +286,7 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
             }
             break;
 
-        case PLCTAG_EVENT_WRITE_STARTED:
-            compat_atomic_inc_int32(&write_started_count);
-            break;
+        case PLCTAG_EVENT_WRITE_STARTED: compat_atomic_inc_int32(&write_started_count); break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
             ws = compat_atomic_inc_int32(&write_completed_count);
@@ -328,15 +327,127 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
             handle_conn_status_event(ts, PLCTAG_CONN_STATUS_ERR_WAIT);
             break;
 
-        default:
-            fprintf(stderr, "[tag %d] unknown event %d: %s\n", (int)tag_id, event, plc_tag_decode_error(status));
-            break;
+        default: fprintf(stderr, "[tag %d] unknown event %d: %s\n", (int)tag_id, event, plc_tag_decode_error(status)); break;
     }
+}
+
+/*
+ * Poll one tag's connection_status until the last expected state or the deadline.  The
+ * status must be the connection's own, so every change seen has to be the next expected
+ * state or a later one.
+ */
+static int poll_connection_states(int32_t tag, int64_t end_time) {
+    int32_t last = PLCTAG_CONN_STATUS_DOWN; /* a new connection's state before its thread runs */
+    int idx = 0;
+    bool saw_connecting = false;
+    bool saw_up = false;
+
+    while(compat_atomic_load_int32(&running) && compat_time_ms() < end_time && idx < num_expected_states) {
+        int32_t cur = plc_tag_get_int_attribute(tag, "connection_status", -999);
+
+        if(cur != last) {
+            int found = idx;
+
+            while(found < num_expected_states && expected_states[found] != cur) { found++; }
+
+            fprintf(stderr, "[tag %d] polled %s\n", (int)tag, conn_status_name(cur));
+
+            if(found == num_expected_states) {
+                fprintf(stderr, "FAIL [tag %d]: polled %s out of order (next expected: %s).\n", (int)tag,
+                        conn_status_name(cur), conn_status_name(expected_states[idx]));
+                return 1;
+            }
+
+            if(cur == PLCTAG_CONN_STATUS_CONNECTING) { saw_connecting = true; }
+            if(cur == PLCTAG_CONN_STATUS_UP) { saw_up = true; }
+
+            idx = found + 1;
+            last = cur;
+        }
+
+        compat_sleep_ms(1, NULL);
+    }
+
+    if(idx < num_expected_states || !saw_connecting || !saw_up) {
+        fprintf(stderr, "FAIL [tag %d]: polling ended at %s; CONNECTING seen %d, UP seen %d.\n", (int)tag,
+                conn_status_name(last), (int)saw_connecting, (int)saw_up);
+        return 1;
+    }
+
+    return 0;
 }
 
 /* -------------------------------------------------------------------------
  * Argument parsing
  * ---------------------------------------------------------------------- */
+
+/*
+ * An @connection tag cannot auto-destroy: it has no reads or writes, and its events are not
+ * activity.  It can be shared with find_or_create_tag.  Returns the number of failures.
+ */
+static int check_attribute_rules(void) {
+    /* its own connection group: a connection left from these checks must not be the one the real test joins. */
+    char attribs[1024];
+    int failed = 0;
+    int32_t a = 0;
+    int32_t b = 0;
+    int32_t rc = 0;
+
+    snprintf(attribs, sizeof(attribs), "%s&connection_group_id=999&destroy_tag_after_idle_sec=10", tag_path);
+    rc = plc_tag_create(attribs, 0);
+    if(rc != PLCTAG_ERR_BAD_PARAM) {
+        fprintf(stderr, "FAIL: create with destroy_tag_after_idle_sec gave %s, expected PLCTAG_ERR_BAD_PARAM.\n",
+                plc_tag_decode_error(rc));
+        failed++;
+    }
+    if(rc >= 0) { plc_tag_destroy(rc); }
+
+    snprintf(attribs, sizeof(attribs), "%s&connection_group_id=999&find_or_create_tag=1", tag_path);
+    a = plc_tag_create(attribs, 0);
+    b = plc_tag_create(attribs, 0);
+    if(a < 0 || a != b) {
+        fprintf(stderr, "FAIL: find_or_create_tag gave handles %d and %d, expected one shared handle.\n", (int)a, (int)b);
+        failed++;
+    }
+
+    if(a >= 0) {
+        uint8_t order[32];
+
+        /* an @connection tag has no byte order: its string and byte-order attributes must not crash (review C3). */
+        if(plc_tag_get_int_attribute(a, "str_is_counted", -7) != -7 || plc_tag_status(a) != PLCTAG_ERR_UNSUPPORTED) {
+            fprintf(stderr, "FAIL: str_is_counted on an @connection tag did not report PLCTAG_ERR_UNSUPPORTED.\n");
+            failed++;
+        }
+
+        rc = plc_tag_get_byte_array_attribute(a, "int32_byte_order", order, (int)sizeof(order));
+        if(rc != PLCTAG_ERR_UNSUPPORTED) {
+            fprintf(stderr, "FAIL: int32_byte_order on an @connection tag gave %s, expected PLCTAG_ERR_UNSUPPORTED.\n",
+                    plc_tag_decode_error(rc));
+            failed++;
+        }
+
+        rc = plc_tag_get_attribute_size(a, "int32_byte_order");
+        if(rc != PLCTAG_ERR_UNSUPPORTED) {
+            fprintf(stderr, "FAIL: the size of int32_byte_order on an @connection tag gave %s, expected PLCTAG_ERR_UNSUPPORTED.\n",
+                    plc_tag_decode_error(rc));
+            failed++;
+        }
+
+        rc = plc_tag_set_int_attribute(a, "destroy_tag_after_idle_sec", 10);
+        if(rc != PLCTAG_ERR_NOT_ALLOWED) {
+            fprintf(stderr, "FAIL: setting destroy_tag_after_idle_sec gave %s, expected PLCTAG_ERR_NOT_ALLOWED.\n",
+                    plc_tag_decode_error(rc));
+            failed++;
+        }
+        plc_tag_destroy(a);
+    }
+    if(b >= 0 && b != a) { plc_tag_destroy(b); }
+
+    fprintf(stderr, "Attribute rules: %s.\n", (failed ? "FAIL" : "ok"));
+
+    return failed;
+}
+
 
 static void parse_args(int argc, char **argv) {
     int i;
@@ -346,6 +457,7 @@ static void parse_args(int argc, char **argv) {
         fprintf(stderr, "  --tag=ATTRIBS            @connection tag attribute string (required)\n");
         fprintf(stderr, "  --num-tags=N             simultaneous @connection tags (default 1, max %d)\n", MAX_TAGS);
         fprintf(stderr, "  --expect-err             expect CONNECTING -> ERR_WAIT (unreachable host)\n");
+        fprintf(stderr, "  --poll                   poll connection_status with no callback instead\n");
         fprintf(stderr, "  --cycles=N               connect/disconnect cycles to verify (default 1, max %d)\n", MAX_CYCLES);
         fprintf(stderr, "  --data-tag=ATTRIBS       data tag on same session; required when --cycles > 1\n");
         fprintf(stderr, "  --idle-timeout-ms=N      set connection_inactivity_timeout_ms on data tag\n");
@@ -358,6 +470,8 @@ static void parse_args(int argc, char **argv) {
             tag_path = &argv[i][6];
         } else if(strncmp(argv[i], "--num-tags=", 11) == 0) {
             num_tags = atoi(&argv[i][11]);
+        } else if(strcmp(argv[i], "--poll") == 0) {
+            poll_mode = true;
         } else if(strcmp(argv[i], "--expect-err") == 0) {
             expect_err = true;
         } else if(strncmp(argv[i], "--cycles=", 9) == 0) {
@@ -418,14 +532,19 @@ int main(int argc, char **argv) {
     parse_args(argc, argv);
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Required library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION,
-                version_major, version_minor, version_patch);
+        fprintf(stderr, "Required library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
+                version_minor, version_patch);
         return 1;
     }
 
     fprintf(stderr, "Library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
     compat_set_interrupt_handler(interrupt_handler);
+
+    if(check_attribute_rules()) {
+        fprintf(stderr, "RESULT: FAIL\n");
+        return 1;
+    }
 
     build_expected_states();
 
@@ -462,6 +581,25 @@ int main(int argc, char **argv) {
         }
     }
 
+    if(poll_mode) {
+        int32_t tag = plc_tag_create(tag_path, 0);
+        int failed = 0;
+
+        if(tag < 0) {
+            fprintf(stderr, "ERROR: could not create @connection tag: %s\n", plc_tag_decode_error((int)tag));
+            if(data_tag) { plc_tag_destroy(data_tag); }
+            return 1;
+        }
+
+        failed = poll_connection_states(tag, compat_time_ms() + run_duration_ms);
+
+        plc_tag_destroy(tag);
+        if(data_tag) { plc_tag_destroy(data_tag); }
+
+        fprintf(stderr, "RESULT: %s\n", (failed ? "FAIL" : "PASS"));
+        return failed;
+    }
+
     for(i = 0; i < num_tags; i++) {
         int32_t tag;
 
@@ -482,8 +620,8 @@ int main(int argc, char **argv) {
         tag_handles[i] = tag;
     }
 
-    fprintf(stderr, "Waiting up to %.1f seconds for %d tag(s), %d cycle(s).\n", (double)run_duration_ms / 1000.0,
-            num_tags, num_cycles);
+    fprintf(stderr, "Waiting up to %.1f seconds for %d tag(s), %d cycle(s).\n", (double)run_duration_ms / 1000.0, num_tags,
+            num_cycles);
 
     end_time = compat_time_ms() + run_duration_ms;
 
@@ -505,8 +643,8 @@ int main(int argc, char **argv) {
             fprintf(stderr, "ERROR [tag %d]: connection_status attribute not found.\n", (int)tag_handles[i]);
             total_failed++;
         } else {
-            fprintf(stderr, "[tag %d] connection_status attribute = %s (%d)\n", (int)tag_handles[i],
-                    conn_status_name(attr_val), attr_val);
+            fprintf(stderr, "[tag %d] connection_status attribute = %s (%d)\n", (int)tag_handles[i], conn_status_name(attr_val),
+                    attr_val);
         }
     }
 
@@ -519,8 +657,8 @@ int main(int argc, char **argv) {
             total_failed++;
         } else if(!compat_atomic_load_int32(&tag_states[i].completed)) {
             int idx = compat_atomic_load_int32(&tag_states[i].next_expected_idx);
-            fprintf(stderr, "FAIL [tag %d]: only %d of %d expected states received (next expected: %s).\n",
-                    (int)tag_handles[i], idx, num_expected_states, conn_status_name(expected_states[idx]));
+            fprintf(stderr, "FAIL [tag %d]: only %d of %d expected states received (next expected: %s).\n", (int)tag_handles[i],
+                    idx, num_expected_states, conn_status_name(expected_states[idx]));
             total_failed++;
         }
     }

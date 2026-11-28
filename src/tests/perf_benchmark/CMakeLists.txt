@@ -23,3 +23,9 @@ target_link_options(perf_benchmark PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LI
 if(UNIX)
     target_link_libraries(perf_benchmark PUBLIC m)
 endif()
+
+# LD_PRELOAD shim that measures mutex wait; needs perf_benchmark linked against plctag_dyn.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(mutex_wait_shim SHARED ${CMAKE_CURRENT_SOURCE_DIR}/mutex_wait_shim.c)
+    target_link_libraries(mutex_wait_shim PRIVATE dl)
+endif()

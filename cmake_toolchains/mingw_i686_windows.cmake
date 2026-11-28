@@ -27,6 +27,5 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 
 # Signal the rest of the build system that this is a 32-bit build so that
-# clang_or_gcc.cmake adds -m32 and src/poc/CMakeLists.txt selects the
-# i386-pc-windows-gnu triple for libyafl.
+# clang_or_gcc.cmake adds -m32.
 set(BUILD_32_BIT ON CACHE BOOL "Build 32-bit code")

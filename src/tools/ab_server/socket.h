@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,11 +33,9 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
 #include "compat.h"
 #include "err.h"
-#include "slice.h"
+#include <utils/byte_slice.h>
 
 #include <stdint.h>
 
@@ -48,31 +48,42 @@ typedef int SOCKET;
 
 /* ===== SOCKET API ===== */
 
-/* Open a TCP client connection
- * Returns: Valid SOCKET file descriptor (>= 0) on success
- *          Negative error code (from err_t) on failure */
-extern SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port);
-
 /* Open a TCP server socket
  * Returns: Valid SOCKET file descriptor (>= 0) on success
  *          Negative error code (from err_t) on failure */
 extern SOCKET socket_open_tcp_server(const char *listening_port);
 
+/* Open a UDP socket bound to the port on every interface, or INVALID_SOCKET. */
+extern SOCKET socket_open_udp_server(const char *listening_port);
+
+/* Where a datagram came from, so the reply can go back.  Big enough for any sockaddr. */
+typedef struct {
+    uint64_t addr[16]; /* 128 bytes, aligned for a sockaddr */
+    uint32_t len;
+} socket_peer_s;
+
+/*
+ * Socket errors are PLCTAG_ERR_* codes in an error slice: PLCTAG_ERR_TIMEOUT, PLCTAG_ERR_CLOSE when
+ * the peer closed, PLCTAG_ERR_READ or PLCTAG_ERR_WRITE for anything else.
+ */
+
+/* Receive one datagram into space, waiting up to timeout_ms.  Returns the filled front of space. */
+extern byte_slice_t socket_read_from(SOCKET sock, byte_slice_t space, uint32_t timeout_ms, socket_peer_s *peer);
+
+/* Send data as one datagram to peer.  Returns the empty remainder. */
+extern byte_slice_t socket_write_to(SOCKET sock, byte_slice_t data, socket_peer_s *peer);
+
+/* The local IPv4 address, host order, that traffic to peer leaves from, or 0. */
+extern uint32_t socket_local_ipv4_toward(socket_peer_s *peer);
+
 /* Close a socket */
 extern void socket_close(SOCKET sock);
 
-/* Accept an incoming connection
- * Returns: 0 on success, error code on failure
- *          On success, *out_client_fd contains the accepted socket
- *          On failure, *out_client_fd is set to INVALID_SOCKET */
-extern int socket_accept(SOCKET sock, uint32_t timeout_ms, SOCKET *out_client_fd);
+/* Accept a connection, waiting up to timeout_ms.  PLCTAG_STATUS_OK, PLCTAG_ERR_TIMEOUT or PLCTAG_ERR_OPEN. */
+extern int32_t socket_accept(SOCKET sock, uint32_t timeout_ms, SOCKET *out_client_fd);
 
-/* Read from socket into buffer
- * Returns: slice_s with data read from socket
- *          On error: slice_has_err() is true, slice_get_err() returns negative error code */
-extern slice_s socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms);
+/* Read what is available into space, waiting up to timeout_ms.  Returns the filled front of space. */
+extern byte_slice_t socket_read(SOCKET sock, byte_slice_t space, uint32_t timeout_ms);
 
-/* Write to socket from buffer
- * Returns: slice_s with length set to bytes written
- *          On error: slice_has_err() is true, slice_get_err() returns negative error code */
-extern slice_s socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms);
+/* Write all of data, waiting up to timeout_ms for each chunk.  Returns the empty remainder. */
+extern byte_slice_t socket_write(SOCKET sock, byte_slice_t data, uint32_t timeout_ms);

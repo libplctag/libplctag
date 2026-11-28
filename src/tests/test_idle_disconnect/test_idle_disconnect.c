@@ -33,14 +33,14 @@
 
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
 #define REQUIRED_VERSION 2, 1, 10
-#define DATA_TIMEOUT 15000 /* generous: refused-connect RST can take ~2s per attempt on slow CI runners (Windows ARM64) */
+#define DATA_TIMEOUT 15000         /* generous: refused-connect RST can take ~2s per attempt on slow CI runners (Windows ARM64) */
 #define NEW_TIMEOUT_MS 6000        /* 6 seconds */
 #define INVALID_TIMEOUT_MS 1000000 /* Way too high, should be clamped */
 #define NEAR_MAX_TIMEOUT_MS 28000  /* Just under 30000ms max */
@@ -123,6 +123,44 @@ static void read_tag(int32_t tag) {
 }
 
 
+/*
+ * An out-of-range timeout in the tag string is clamped to 100-30000ms, the same as a set (#689).
+ * Each probe uses its own group, so it checks a connection it created: a destroyed probe's connection can
+ * still be there when the next probe is created.
+ */
+static void check_create_clamp(int32_t requested_ms, int32_t expected_ms) {
+    static int32_t group_id = 99; /* a new connection per probe */
+    char probe_path[1024];
+    int32_t probe = 0;
+    int32_t value = 0;
+
+    compat_snprintf(probe_path, sizeof(probe_path),
+                    "%s&connection_group_id=%" PRId32 "&connection_inactivity_timeout_ms=%" PRId32, tag_path, group_id++,
+                    requested_ms);
+
+    probe = plc_tag_create(probe_path, DATA_TIMEOUT);
+    if(probe < 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR %s: Could not create the tag with a timeout of %" PRId32 " ms!\n", plc_tag_decode_error(probe),
+                requested_ms);
+        exit(1);
+    }
+
+    value = (int32_t)plc_tag_get_int_attribute(probe, "connection_inactivity_timeout_ms", 0);
+    plc_tag_destroy(probe);
+
+    if(value != expected_ms) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: a timeout of %" PRId32 " ms at create became %" PRId32 " ms, expected %" PRId32 " ms.\n",
+                requested_ms, value, expected_ms);
+        exit(1);
+    }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "A timeout of %" PRId32 " ms at create was clamped to %" PRId32 " ms.\n", requested_ms, value);
+}
+
+
 static void wait_until(int64_t end_time_ms) {
     int64_t now_ms = compat_time_ms();
     int64_t start_time_ms = now_ms;
@@ -162,6 +200,9 @@ int main(int argc, char **argv) {
     parse_args(argc, argv);
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+
+    check_create_clamp(50, 100);
+    check_create_clamp(60000, 30000);
 
     /* create the tag */
     tag = create_tag();

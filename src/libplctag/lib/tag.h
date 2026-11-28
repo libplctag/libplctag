@@ -35,7 +35,7 @@
 #pragma once
 
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
@@ -50,9 +50,14 @@ typedef struct plc_tag_t *plc_tag_p;
  * destructor), so any code reachable from a valid plc_tag_p may use
  * tag->instance->tags / tag->instance->tag_lookup_mutex directly: those objects
  * cannot be destroyed while a tag referencing them still exists. */
-typedef struct tag_registry_t *tag_registry_p;
+typedef struct lib_instance_t *lib_instance_p;
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
+
+/* a protocol's tag constructor.  src_tag is set by plc_tag_create_from_tag(). */
+typedef plc_tag_p (*tag_create_function)(attr attributes,
+                                         void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                         void *userdata, plc_tag_p src_tag);
 
 /*
  * Runtime attribute descriptors.  The core and each protocol publish a NULL-name-terminated
@@ -68,7 +73,10 @@ typedef enum {
     ATTR_TYPE_BYTES,
 
     /* ATTR_TYPE_BYTES holding NUL-terminated text.  The reported size includes the terminator. */
-    ATTR_TYPE_STRING
+    ATTR_TYPE_STRING,
+
+    /* a 64-bit integer, read with plc_tag_get_int64_attribute() through get_int64. */
+    ATTR_TYPE_INT64
 } attr_val_type_t;
 
 typedef struct attr_def_t attr_def_t;
@@ -80,6 +88,7 @@ struct attr_def_t {
 
     union {
         int32_t (*get_int)(plc_tag_p tag, int32_t *result);
+        int32_t (*get_int64)(plc_tag_p tag, int64_t *result);
         int32_t (*get_bytes)(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
     };
 
@@ -100,6 +109,10 @@ extern const attr_def_t *attr_find(plc_tag_p tag, const char *name);
 /* Resolve a name against the library-scope table, used when the tag id is zero.  Those
  * accessors take a NULL tag. */
 extern const attr_def_t *attr_find_lib(const char *name);
+
+/* Resize the tag's data buffer.  The caller holds tag->api_mutex.  PLCTAG_ERR_BAD_PARAM for a
+ * negative size, PLCTAG_ERR_BUSY while a read or write is in flight. */
+extern int32_t tag_set_size_unsafe(plc_tag_p tag, int32_t new_size);
 
 /* Helpers for an ATTR_TYPE_STRING accessor.  attr_copy_string() copies str and its
  * terminator into buffer and returns the number of bytes copied, or PLCTAG_ERR_TOO_SMALL.
@@ -141,23 +154,18 @@ struct tag_vtable_t {
      */
     tag_vtable_func tag_data_written;
 
+    /*
+     * Called after destroy_tag_after_idle_sec changes at runtime, while api_mutex is held.
+     * NULL for a protocol whose tags the generic tickler checks for idling.
+     */
+    tag_vtable_func idle_changed;
+
     /* Runtime attributes this protocol publishes, NULL-name-terminated.  Consulted before
      * the core table, so a protocol can override or suppress a core attribute. */
     const attr_def_t *attribs;
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;
-
-typedef enum {
-    TAG_PROTOCOL_UNKNOWN = 0,
-    TAG_PROTOCOL_SYSTEM = 1,
-    TAG_PROTOCOL_AB = 2,
-    TAG_PROTOCOL_AB_CONNECTION = 3,
-    TAG_PROTOCOL_MODBUS = 4,
-    TAG_PROTOCOL_OMRON = 5,
-    TAG_PROTOCOL_MB_CONNECTION = 6,
-    TAG_PROTOCOL_OMRON_CONNECTION = 7
-} tag_protocol_t;
 
 
 /* Shared connection event types — used by AB, Modbus, and Omron connection tags */
@@ -173,6 +181,24 @@ typedef struct {
     int32_t event_type; /* tag_conn_event_type_t */
     int32_t status;
 } tag_conn_event_t;
+
+
+/*
+ * Per-tag event queue.  Raising an event only queues it; plc_tag_generic_handle_event_callbacks()
+ * delivers the queue in order.  A callback that raises events, or destroys its own tag, gets them
+ * delivered after it returns, by the dispatch loop that called it.
+ *
+ * ponytail: fixed 16 entries.  The handler dispatches every pass, so a full ring means the
+ * dispatcher is starved; the push logs ERROR and drops the event.  Grow it if a real workload
+ * hits that.
+ */
+#define TAG_EVENT_RING_SIZE (16)
+#define TAG_EVENT_RING_MASK (TAG_EVENT_RING_SIZE - 1)
+
+typedef struct {
+    uint8_t event; /* PLCTAG_EVENT_*, all below 256 */
+    int8_t status;
+} tag_event_t;
 
 
 /* byte ordering */
@@ -216,59 +242,86 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
  * The base type only has a vtable for operations.
  */
 
-/* NB: sorted by decreasing size and then alphabetically */
+/*
+ * NB: grouped by alignment, largest first, so the compiler adds no padding between fields:
+ * 64-bit, then structs aligned to 8, then pointers (8 or 4 bytes by platform), then 32-bit,
+ * then 8-bit, then the bitfields.  Alphabetical within a group.  atomic_bool is 4 bytes on
+ * Windows; it stays with the 8-bit fields so every platform has one order.
+ */
 
-#define TAG_BASE_STRUCT                                                                 \
-    int64_t auto_sync_next_read;                                                        \
-    int64_t auto_sync_next_write;                                                       \
-    int64_t read_cache_expire;                                                          \
-    int64_t read_cache_ms;                                                              \
-    uint8_t *data;                                                                      \
-    tag_byte_order_t *byte_order;                                                       \
-    cond_p tag_cond_wait;                                                               \
-    mutex_p api_mutex;                                                                  \
-    mutex_p ext_mutex;                                                                  \
-    tag_extended_callback_func callback;                                                \
-    tag_vtable_p vtable;                                                                \
-    tag_registry_p instance;                                                            \
-    void *userdata;                                                                     \
-    int32_t auto_sync_read_ms;                                                          \
-    int32_t auto_sync_write_ms;                                                         \
-    int32_t size;                                                                       \
-    int32_t tag_id;                                                                     \
-    int connection_group_id;                                                            \
-    int bit;                                                                            \
-    int protocol_type;                                                                  \
-    atomic_bool abort_requested;                                                        \
+#define TAG_BASE_STRUCT                      \
+    int64_t auto_sync_next_read;             \
+    int64_t auto_sync_next_write;            \
+    /* last read or write start, or auto-destroy change.  Under api_mutex. */ \
+    int64_t last_activity_ms;                \
+    int64_t read_cache_expire;               \
+    int64_t read_cache_ms;                   \
+    mutex_t api_mutex;                       \
+    mutex_t ext_mutex;                       \
+    tag_byte_order_t *byte_order;            \
+    tag_extended_callback_func callback;     \
+    /* the tag's connection (CIP session or Modbus PLC), NULL if it has none.  The protocol's   \
+     * own field holds the reference; this is a copy for plc_tag_create_from_tag(), which  \
+     * passes the source tag to create_func.  Set once during create. */                   \
+    void *conn;                              \
+    /* the connection's statistics, on @connection tags only; NULL on other tags.  Set once    \
+     * during create; lives as long as the connection the tag holds. */                          \
+    struct conn_stats_t *conn_stats;         \
+    tag_create_function create_func;         \
+    uint8_t *data;                           \
+    lib_instance_p instance;                 \
+    /* the tag string while the tag is in the reuse table.  Under tag_lookup_mutex. */ \
+    char *reuse_key;                         \
+    cond_p tag_cond_wait;                    \
+    void *userdata;                          \
+    tag_vtable_p vtable;                     \
+    int32_t auto_sync_read_ms;               \
+    int32_t auto_sync_write_ms;              \
+    int32_t bit;                             \
+    int32_t connection_group_id;             \
+    /* seconds without a read or write before the tickler destroys the tag; 0 = off.  Atomic: \
+     * the tickler reads it without api_mutex to pick its tags. */ \
+    atomic_int32_t destroy_idle_sec;         \
+    /* reads the tickler has completed, and the last one's result (last_read_rc), so a waiting \
+     * plc_tag_read() knows its own read ended even if the next one has started.  Under api_mutex. */ \
+    uint32_t reads_done;                     \
+    int32_t size;                            \
+    int32_t tag_id;                          \
+    tag_event_t events[TAG_EVENT_RING_SIZE]; \
+    atomic_bool abort_requested;             \
     /* Read by tag_tickler_func() under the global tag_lookup_mutex, while every other  \
      * field below is written under this tag's own per-tag api_mutex -- a different     \
      * lock domain. Packing it into the bitfield run below would race with writes to    \
-     * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */ \
-    atomic_bool skip_tickler;                                                           \
-    int8_t event_creation_complete_status;                                              \
-    int8_t event_deletion_started_status;                                               \
-    int8_t event_operation_aborted_status;                                              \
-    int8_t event_read_complete_status;                                                  \
-    int8_t event_read_started_status;                                                   \
-    int8_t event_write_complete_status;                                                 \
-    int8_t event_write_started_status;                                                  \
-    int8_t status;                                                                      \
-    uint8_t allow_field_resize : 1;                                                     \
-    uint8_t event_creation_complete : 1;                                                \
-    uint8_t event_deletion_started : 1;                                                 \
-    uint8_t event_operation_aborted : 1;                                                \
-    uint8_t event_read_complete : 1;                                                    \
-    uint8_t event_read_complete_enable : 1;                                             \
-    uint8_t event_read_started : 1;                                                     \
-    uint8_t event_write_complete : 1;                                                   \
-    uint8_t event_write_complete_enable : 1;                                            \
-    uint8_t event_write_started : 1;                                                    \
-    uint8_t had_created_event : 1;                                                      \
-    uint8_t is_bit : 1;                                                                 \
-    uint8_t read_complete : 1;                                                          \
-    uint8_t read_in_flight : 1;                                                         \
-    uint8_t tag_is_dirty : 1;                                                           \
-    uint8_t write_complete : 1;                                                         \
+     * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */  \
+    atomic_bool skip_tickler;                \
+    /* bumped by every abort, so a caller can see an abort raised from a callback.  Under api_mutex. */ \
+    uint8_t abort_count;                     \
+    /* the create has ended, and how.  Under api_mutex. */ \
+    bool create_done;                        \
+    int8_t create_result;                    \
+    /* data is part of the tag's own allocation, so it cannot be resized. */ \
+    bool data_is_fixed;                      \
+    /* inside the dispatch loop, so nested raises only queue.  Under api_mutex. */ \
+    bool dispatching;                        \
+    uint8_t event_count; /* queued */          \
+    uint8_t event_head;  /* next to deliver */ \
+    /* created with find_or_create_tag=1. */ \
+    bool find_or_create_tag;                 \
+    int8_t last_read_rc;                     \
+    int8_t status;                           \
+    uint8_t allow_field_resize : 1;          \
+    /* holds PLC data, so destroy_idle_sec applies. */ \
+    uint8_t can_auto_destroy : 1;            \
+    /* CREATED is queued and not yet delivered. */ \
+    uint8_t event_creation_complete : 1;     \
+    uint8_t event_read_complete_enable : 1;  \
+    uint8_t event_write_complete_enable : 1; \
+    uint8_t had_created_event : 1;           \
+    uint8_t is_bit : 1;                      \
+    uint8_t read_complete : 1;               \
+    uint8_t read_in_flight : 1;              \
+    uint8_t tag_is_dirty : 1;                \
+    uint8_t write_complete : 1;              \
     uint8_t write_in_flight : 1
 
 
@@ -283,38 +336,42 @@ struct plc_tag_t {
 
 extern atomic_bool lib_active;
 
+extern int lib_init(void);
+extern void lib_teardown(void);
 
 /* Acquire a reference to the current library instance, or NULL if the library is
  * not running (never started, or a shutdown has closed the gate). Safe to call
  * from any thread at any time; the caller must rc_dec() the result when done,
  * unless it is being transferred into a tag's tag->instance field (in which case
  * the tag's own destructor is the release). */
-/*
- * tag_range_is_valid
- *
- * Is a field of count bytes starting at offset entirely inside the tag buffer?
- *
- * The offset and the count both come from the calling application, so they are
- * assumed hostile.  Note what this deliberately does NOT do: it never computes
- * offset + count.  That sum can exceed INT_MAX, and signed overflow is undefined
- * behavior -- a bounds check that overflows to a negative value happily reports
- * that a wildly out-of-range access is fine.  Instead every operand is forced
- * non-negative first, which makes tag->size - offset provably in range, and the
- * comparison is done against the space remaining.
- */
-static inline bool tag_range_is_valid(plc_tag_p tag, int offset, int count) {
-    if(offset < 0 || count < 0 || tag->size < 0) { return false; }
+extern lib_instance_p lib_instance_acquire(void);
 
-    /* both operands are now in [0, INT32_MAX], so this subtraction cannot overflow. */
-    return count <= tag->size - offset;
-}
+/* Used only by initialize_modules() (init.c): publishes the instance lib_init()
+ * built (making it visible to lib_instance_acquire()) once every protocol module
+ * has also initialized successfully, and only then starts the tag tickler thread.
+ * The tickler must be started last -- see the design note on lib_instance_publish()
+ * in lib.c for why starting it any earlier is a bug. */
+extern void lib_instance_publish(void);
 
+/* Used only by initialize_modules() on a failure path after lib_init() has already
+ * succeeded (e.g. ab_init()/mb_init() failing): discards the instance
+ * lib_init() built without ever publishing it. */
+extern void lib_instance_discard_pending(void);
 
-/* Remove a tag from play: abort, raise DESTROYED, drop the library reference. */
-extern void destroy_tag_common(plc_tag_p tag);
+/* tags that hold PLC data; system and connection tags cannot be auto-destroyed. */
+#define tag_can_auto_destroy(tag) ((tag)->can_auto_destroy)
+
+/* zero, or at least this many seconds. */
+#define TAG_AUTO_DESTROY_MIN_SEC (10)
 
 extern void plc_tag_generic_tickler(plc_tag_p tag);
+/* Destroy a tag that has idled past destroy_tag_after_idle_sec.  Call holding no tag or PLC lock. */
+extern void plc_tag_generic_auto_destroy(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
+/* Queue an event.  False only when the ring is full; with no callback the event is dropped. */
+extern bool tag_event_push(plc_tag_p tag, int event, int status);
+/* Queue a connection tag event; false when the ring is full so the caller retries next pass. */
+extern bool tag_push_conn_event(plc_tag_p tag, int32_t event_type, int32_t status, bool io_events);
 #define plc_tag_tickler_wake() plc_tag_tickler_wake_impl(__func__, __LINE__)
 extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
 #define plc_tag_generic_wake_tag(tag) plc_tag_generic_wake_tag_impl(__func__, __LINE__, tag)
@@ -324,97 +381,59 @@ extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
                                     void *userdata);
 
 static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
+    /*
+     * CREATED, or the create read completing, ends the create, callback or not; a failure there
+     * sticks.  A refusal (BUSY) of an operation tried before then is not the create's result.
+     */
+    if(!tag->create_done && status != PLCTAG_STATUS_PENDING && status != PLCTAG_ERR_BUSY
+       && (event == PLCTAG_EVENT_CREATED || event == PLCTAG_EVENT_READ_COMPLETED)) {
+        tag->create_done = true;
+        tag->create_result = status;
+    }
+
     /* do not stack up events if there is no callback. */
     if(!tag->callback) { return; }
 
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Event %d raised with status %s.", event, plc_tag_decode_error(status));
+
     switch(event) {
         case PLCTAG_EVENT_ABORTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_ABORTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_operation_aborted = 1;
-            tag->event_operation_aborted_status = status;
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising synthesized created event on abort event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
-            break;
-
+        case PLCTAG_EVENT_READ_COMPLETED:
+        case PLCTAG_EVENT_WRITE_COMPLETED:
         case PLCTAG_EVENT_CREATED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CREATED raised with status %s.",
-                   plc_tag_decode_error(status));
+            /* CREATED comes first and only once; the first of these synthesizes it. */
             if(!tag->had_created_event) {
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
                 tag->had_created_event = 1;
-            } else {
+                tag->event_creation_complete = 1;
+                /* an abort that ends the create is a failed create, whatever the abort returned. */
+                tag_event_push(tag, PLCTAG_EVENT_CREATED, (event == PLCTAG_EVENT_ABORTED) ? (int8_t)PLCTAG_ERR_ABORT : status);
+            } else if(event == PLCTAG_EVENT_CREATED) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CREATED skipped due to duplication.");
             }
-            break;
 
-        case PLCTAG_EVENT_DESTROYED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_DESTROYED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_deletion_started = 1;
-            tag->event_deletion_started_status = status;
-            break;
-
-        case PLCTAG_EVENT_READ_COMPLETED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_READ_COMPLETED raised with status %s.",
-                   plc_tag_decode_error(status));
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising synthesized created event on read completed event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
-
-            if(tag->event_read_complete_enable) {
-                tag->event_read_complete = 1;
-                tag->event_read_complete_status = status;
+            if(event == PLCTAG_EVENT_ABORTED) {
+                tag_event_push(tag, event, status);
+            } else if(event == PLCTAG_EVENT_READ_COMPLETED && tag->event_read_complete_enable) {
                 tag->event_read_complete_enable = 0;
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Disabled PLCTAG_EVENT_READ_COMPLETE.");
+                tag_event_push(tag, event, status);
+            } else if(event == PLCTAG_EVENT_WRITE_COMPLETED && tag->event_write_complete_enable) {
+                tag->event_write_complete_enable = 0;
+                tag_event_push(tag, event, status);
             }
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_READ_STARTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_read_started = 1;
-            tag->event_read_started_status = status;
             tag->event_read_complete_enable = 1;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Enabled PLCTAG_EVENT_READ_COMPLETE.");
-            break;
-
-        case PLCTAG_EVENT_WRITE_COMPLETED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_WRITE_COMPLETED raised with status %s.",
-                   plc_tag_decode_error(status));
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id,
-                       "Raising synthesized created event on write completed event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
-
-            if(tag->event_write_complete_enable) {
-                tag->event_write_complete = 1;
-                tag->event_write_complete_status = status;
-                tag->event_write_complete_enable = 0;
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Disabled PLCTAG_EVENT_WRITE_COMPLETE.");
-            }
+            tag_event_push(tag, event, status);
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_WRITE_STARTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_write_started = 1;
-            tag->event_write_started_status = status;
             tag->event_write_complete_enable = 1;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Enabled PLCTAG_EVENT_WRITE_COMPLETE.");
+            tag_event_push(tag, event, status);
             break;
 
-        default: pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unsupported event %d!", status); break;
+        case PLCTAG_EVENT_DESTROYED: tag_event_push(tag, event, status); break;
+
+        default: pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unsupported event %d!", event); break;
     }
 }

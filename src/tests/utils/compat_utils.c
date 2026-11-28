@@ -406,20 +406,8 @@ int compat_cond_destroy(compat_cond_t *cond) {
 }
 
 
-int64_t compat_time_ms(void) {
-    FILETIME ft;
-    int64_t res;
-
-    GetSystemTimeAsFileTime(&ft);
-
-    /* calculate time as 100ns increments since Jan 1, 1601. */
-    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
-
-    /* get time in ms */
-    res = res / 10000;
-
-    return res;
-}
+/* monotonic, like the POSIX version: a CI runner's clock has been seen to jump 23 s mid-test. */
+int64_t compat_time_ms(void) { return (int64_t)GetTickCount64(); }
 
 
 int compat_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms) {

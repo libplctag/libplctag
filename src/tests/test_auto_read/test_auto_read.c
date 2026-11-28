@@ -46,7 +46,12 @@
  *   - CPU load percentage
  *
  * Usage:
- *   test_auto_read --tag=<attr_string> --num-tags=N --duration=S
+ *   test_auto_read --tag=<attr_string> --num-tags=N --duration=S [--periods=P1,P2,...]
+ *
+ * With --periods the tag string has no auto_sync_read_ms; tag i reads every P(i mod n) ms.
+ * Mixed periods are the case where a re-armed tag lands in the middle of the handler's tag
+ * list rather than at either end.  Fairness then only holds within a period, so the check is
+ * per tag: at least half of duration / its own period.  A per-period table shows lateness.
  *
  * The tag attribute string must already contain auto_sync_read_ms=<period>.
  */
@@ -59,7 +64,7 @@
 
 #include "compat_utils.h"
 #include "stats.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 
 #ifdef POSIX_PLATFORM
 #    include <sys/resource.h>
@@ -71,6 +76,7 @@
 
 
 #define TAG_CREATE_TIMEOUT_MS (10000)
+#define MAX_PERIODS (16)
 
 
 /*
@@ -78,7 +84,7 @@
  * Callbacks suppress statistics accumulation until this flag is set so that
  * early-created tags do not accumulate more reads than late-created ones.
  */
-static volatile int recording = 0;
+static compat_atomic_int32_t recording; /* zero-initialized: not recording */
 
 
 /*--- Per-tag statistics ---*/
@@ -106,9 +112,9 @@ static double get_cpu_time_ms(void) {
     FILETIME creation, exitt, kernel, user;
     ULARGE_INTEGER k, u;
     if(!GetProcessTimes(GetCurrentProcess(), &creation, &exitt, &kernel, &user)) { return 0.0; }
-    k.LowPart  = kernel.dwLowDateTime;
+    k.LowPart = kernel.dwLowDateTime;
     k.HighPart = kernel.dwHighDateTime;
-    u.LowPart  = user.dwLowDateTime;
+    u.LowPart = user.dwLowDateTime;
     u.HighPart = user.dwHighDateTime;
     return (double)(k.QuadPart + u.QuadPart) / 10000.0;
 #else
@@ -124,17 +130,15 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
     tag_stats_t *s = (tag_stats_t *)userdata;
 
     switch(event) {
-        case PLCTAG_EVENT_CREATED:
-            compat_atomic_store_int64(&s->ready_time, compat_time_ms());
-            break;
+        case PLCTAG_EVENT_CREATED: compat_atomic_store_int64(&s->ready_time, compat_time_ms()); break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            if(status == PLCTAG_STATUS_OK && recording) {
-                int64_t now  = compat_time_ms();
+            if(status == PLCTAG_STATUS_OK && compat_atomic_load_int32(&recording)) {
+                int64_t now = compat_time_ms();
                 int64_t last = compat_atomic_load_int64(&s->last_read_ms);
 
                 if(last > 0) {
-                    int64_t gap     = now - last;
+                    int64_t gap = now - last;
                     int64_t cur_max = compat_atomic_load_int64(&s->max_gap_ms);
                     int64_t cur_min = compat_atomic_load_int64(&s->min_gap_ms);
 
@@ -166,6 +170,9 @@ static void usage(const char *prog) {
             "  --num-tags=N         Number of tags to create (required, > 0).\n"
             "  --duration=S         Test duration in seconds after all tags are\n"
             "                       ready (required, > 0).\n"
+            "  --periods=P1,P2,...  Mixed auto-sync read periods in ms, tag i gets\n"
+            "                       P(i mod n).  The tag string then has no\n"
+            "                       auto_sync_read_ms.\n"
             "\n"
             "Example:\n"
             "  %s --tag='protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix"
@@ -179,8 +186,10 @@ static void usage(const char *prog) {
 
 int main(int argc, char **argv) {
     const char *tag_string = NULL;
-    int num_tags   = 0;
+    int num_tags = 0;
     int duration_s = 0;
+    int periods[MAX_PERIODS];
+    int num_periods = 0;
 
     /*--- Parse arguments ---*/
     for(int i = 1; i < argc; i++) {
@@ -190,6 +199,13 @@ int main(int argc, char **argv) {
             num_tags = atoi(argv[i] + 11);
         } else if(strncmp(argv[i], "--duration=", 11) == 0) {
             duration_s = atoi(argv[i] + 11);
+        } else if(strncmp(argv[i], "--periods=", 10) == 0) {
+            const char *p = argv[i] + 9;
+
+            while(p && num_periods < MAX_PERIODS) {
+                periods[num_periods++] = atoi(p + 1);
+                p = strchr(p + 1, ',');
+            }
         } else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             usage(argv[0]);
@@ -209,6 +225,21 @@ int main(int argc, char **argv) {
     if(duration_s <= 0) {
         fprintf(stderr, "Error: --duration must be a positive integer.\n");
         usage(argv[0]);
+    }
+
+    /* the period sets the expected read count per tag */
+    const char *period_attr = strstr(tag_string, "auto_sync_read_ms=");
+    if(num_periods == 0) {
+        periods[num_periods++] = period_attr ? atoi(period_attr + 18) : 0;
+    } else if(period_attr) {
+        fprintf(stderr, "Error: with --periods, --tag must not contain auto_sync_read_ms.\n");
+        usage(argv[0]);
+    }
+    for(int p = 0; p < num_periods; p++) {
+        if(periods[p] <= 0) {
+            fprintf(stderr, "Error: every auto-sync read period must be > 0 (auto_sync_read_ms or --periods).\n");
+            usage(argv[0]);
+        }
     }
 
     /*--- Allocate per-tag arrays ---*/
@@ -231,17 +262,35 @@ int main(int argc, char **argv) {
     fprintf(stderr, "==============\n");
     fprintf(stderr, "Tag string: %s\n", tag_string);
     fprintf(stderr, "Num tags:   %d\n", num_tags);
-    fprintf(stderr, "Duration:   %d seconds\n\n", duration_s);
+    fprintf(stderr, "Duration:   %d seconds\n", duration_s);
+    fprintf(stderr, "Periods:   ");
+    for(int p = 0; p < num_periods; p++) { fprintf(stderr, " %d", periods[p]); }
+    fprintf(stderr, " ms\n\n");
+
+    size_t mixed_len = strlen(tag_string) + 32;
+    char *mixed_string = malloc(mixed_len);
+    if(!mixed_string) {
+        fprintf(stderr, "Error: failed to allocate the tag string.\n");
+        return 1;
+    }
 
     /*--- Create all tags asynchronously ---*/
     fprintf(stderr, "Creating tags...\n");
     for(int i = 0; i < num_tags; i++) {
-        int32_t id = plc_tag_create_ex(tag_string, tag_callback, &stats[i], 0);
+        const char *this_string = tag_string;
+
+        if(!period_attr) {
+            snprintf(mixed_string, mixed_len, "%s&auto_sync_read_ms=%d", tag_string, periods[i % num_periods]);
+            this_string = mixed_string;
+        }
+
+        int32_t id = plc_tag_create_ex(this_string, tag_callback, &stats[i], 0);
         if(id < 0) {
             fprintf(stderr, "Failed to create tag %d: %s\n", i, plc_tag_decode_error(id));
             for(int j = 0; j < i; j++) { plc_tag_destroy(tag_ids[j]); }
             free(tag_ids);
             free(stats);
+            free(mixed_string);
             return 1;
         }
 
@@ -251,6 +300,7 @@ int main(int argc, char **argv) {
         if((i + 1) % 50 == 0) { fprintf(stderr, "  Created %d tags...\n", i + 1); }
     }
 
+    free(mixed_string);
     fprintf(stderr, "All %d tags submitted for creation.\n", num_tags);
 
     /*--- Wait for all tags to be ready ---*/
@@ -274,8 +324,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Warning: not all tags became ready within %d ms.\n", TAG_CREATE_TIMEOUT_MS);
         for(int i = 0; i < num_tags; i++) {
             if(compat_atomic_load_int64(&stats[i].ready_time) == 0) {
-                fprintf(stderr, "  Tag %d (id=%d): %s\n", i, tag_ids[i],
-                        plc_tag_decode_error(plc_tag_status(tag_ids[i])));
+                fprintf(stderr, "  Tag %d (id=%d): %s\n", i, tag_ids[i], plc_tag_decode_error(plc_tag_status(tag_ids[i])));
             }
         }
     } else {
@@ -284,21 +333,21 @@ int main(int argc, char **argv) {
 
     /*--- Enable recording and start measurement ---*/
     fprintf(stderr, "\nRunning test for %d seconds...\n", duration_s);
-    double  cpu_start  = get_cpu_time_ms();
+    double cpu_start = get_cpu_time_ms();
     int64_t wall_start = compat_time_ms();
 
-    recording = 1; /* callbacks begin accumulating stats */
+    compat_atomic_store_int32(&recording, 1); /* callbacks begin accumulating stats */
 
     compat_sleep_ms((uint32_t)(duration_s * 1000), NULL);
 
-    recording = 0; /* stop accumulating before destroying tags */
+    compat_atomic_store_int32(&recording, 0); /* stop accumulating before destroying tags */
 
     int64_t wall_end = compat_time_ms();
-    double  cpu_end  = get_cpu_time_ms();
+    double cpu_end = get_cpu_time_ms();
 
-    int64_t duration_ms  = wall_end - wall_start;
-    double  cpu_time_ms  = cpu_end - cpu_start;
-    double  cpu_load_pct = (duration_ms > 0) ? (cpu_time_ms / (double)duration_ms) * 100.0 : 0.0;
+    int64_t duration_ms = wall_end - wall_start;
+    double cpu_time_ms = cpu_end - cpu_start;
+    double cpu_load_pct = (duration_ms > 0) ? (cpu_time_ms / (double)duration_ms) * 100.0 : 0.0;
 
     fprintf(stderr, "Test complete. Actual duration: %" PRId64 " ms\n\n", duration_ms);
     fflush(stderr);
@@ -323,11 +372,11 @@ int main(int argc, char **argv) {
     int64_t global_max_gap = 0;
 
     for(int i = 0; i < num_tags; i++) {
-        int32_t count     = compat_atomic_load_int32(&stats[i].read_count);
+        int32_t count = compat_atomic_load_int32(&stats[i].read_count);
         int64_t total_gap = compat_atomic_load_int64(&stats[i].total_gap_ms);
-        int64_t min_gap   = compat_atomic_load_int64(&stats[i].min_gap_ms);
-        int64_t max_gap   = compat_atomic_load_int64(&stats[i].max_gap_ms);
-        int64_t avg_gap   = (count > 1) ? (total_gap / (count - 1)) : 0;
+        int64_t min_gap = compat_atomic_load_int64(&stats[i].min_gap_ms);
+        int64_t max_gap = compat_atomic_load_int64(&stats[i].max_gap_ms);
+        int64_t avg_gap = (count > 1) ? (total_gap / (count - 1)) : 0;
 
         fprintf(stderr,
                 "Tag %3d (id=%d): reads=%d  avg_gap=%" PRId64 "ms"
@@ -344,25 +393,58 @@ int main(int argc, char **argv) {
     stats_summary_t summary;
     int stats_ok = (stats_calculate(read_counts, num_tags, &summary) == 0);
 
-    double fairness_cv      = stats_ok ? summary.cv            : 0.0;
+    double fairness_cv = stats_ok ? summary.cv : 0.0;
     double fairness_min_max = stats_ok ? summary.min_max_ratio : 0.0;
 
     /*--- Print summary ---*/
     fprintf(stderr, "\n--- Summary ---\n");
     fprintf(stderr, "Duration:          %" PRId64 " ms\n", duration_ms);
-    fprintf(stderr, "CPU load:          %.2f%%\n",          cpu_load_pct);
-    fprintf(stderr, "Global min gap:    %" PRId64 " ms\n",  global_min_gap);
-    fprintf(stderr, "Global max gap:    %" PRId64 " ms\n",  global_max_gap);
-    fprintf(stderr, "Fairness CV:       %.2f%%\n",          fairness_cv);
-    fprintf(stderr, "Fairness min/max:  %.4f\n",            fairness_min_max);
+    fprintf(stderr, "CPU load:          %.2f%%\n", cpu_load_pct);
+    fprintf(stderr, "Global min gap:    %" PRId64 " ms\n", global_min_gap);
+    fprintf(stderr, "Global max gap:    %" PRId64 " ms\n", global_max_gap);
+    fprintf(stderr, "Fairness CV:       %.2f%%\n", fairness_cv);
+    fprintf(stderr, "Fairness min/max:  %.4f\n", fairness_min_max);
 
     if(stats_ok) {
         stats_print_summary(stderr, &summary);
         stats_print_histogram(stderr, read_counts, num_tags, 0, 40);
     }
 
+    /* across mixed periods the counts differ by design. */
     int fair = 1;
-    if(stats_ok) { fair = (stats_assess_fairness(&summary, stderr) == 0); }
+    if(stats_ok && num_periods == 1) { fair = (stats_assess_fairness(&summary, stderr) == 0); }
+
+    /* A tag that never reads is perfectly fair, so check the count too.  The floor is half
+       the expected count, loose enough for CI stalls; it catches a stopped tag, not a slow one. */
+    int short_tags = 0;
+    fprintf(stderr, "\n%8s %6s %9s %9s %9s %9s %9s\n", "period", "tags", "expected", "min", "mean", "avg gap", "max gap");
+    for(int p = 0; p < num_periods; p++) {
+        int64_t expected_reads = duration_ms / periods[p];
+        int64_t min_reads      = expected_reads / 2;
+        int tags = 0, fewest = -1;
+        int64_t reads = 0, gaps = 0, gap_count = 0, worst_gap = 0;
+
+        for(int i = p; i < num_tags; i += num_periods) {
+            int32_t count = read_counts[i];
+
+            if(count == 0 || count < min_reads) { short_tags++; }
+            if(fewest < 0 || count < fewest) { fewest = count; }
+            if(count > 1) {
+                gaps += compat_atomic_load_int64(&stats[i].total_gap_ms);
+                gap_count += count - 1;
+            }
+            if(compat_atomic_load_int64(&stats[i].max_gap_ms) > worst_gap) { worst_gap = compat_atomic_load_int64(&stats[i].max_gap_ms); }
+            reads += count;
+            tags++;
+        }
+
+        fprintf(stderr, "%8d %6d %9" PRId64 " %9d %9.1f %9.1f %9" PRId64 "\n", periods[p], tags, expected_reads, fewest,
+                tags ? (double)reads / tags : 0.0, gap_count ? (double)gaps / (double)gap_count : 0.0, worst_gap);
+    }
+    if(short_tags) {
+        fprintf(stderr, "FAIL: %d of %d tags read fewer than half their expected count.\n", short_tags, num_tags);
+        fair = 0;
+    }
 
     free(read_counts);
     free(stats);

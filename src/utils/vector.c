@@ -31,7 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <platform.h>
 #include <stdlib.h>
 #include <utils/debug.h>
@@ -186,9 +186,7 @@ void *vector_get(vector_p vec, int index) {
         return NULL;
     }
 
-    if(index < 0 || index >= vec->len) {
-        return NULL;
-    }
+    if(index < 0 || index >= vec->len) { return NULL; }
 
 
     return vec->data[index];
@@ -205,9 +203,7 @@ void *vector_remove(vector_p vec, int index) {
         return NULL;
     }
 
-    if(index < 0 || index >= vec->len) {
-        return NULL;
-    }
+    if(index < 0 || index >= vec->len) { return NULL; }
 
     /* get the value in this slot before we overwrite it. */
     result = vec->data[index];
@@ -234,9 +230,7 @@ int vector_find_index(vector_p vec, void *val) {
     }
 
     for(int i = 0; i < vec->len; i++) {
-        if(vec->data[i] == val) {
-            return i;
-        }
+        if(vec->data[i] == val) { return i; }
     }
 
     return -1;
@@ -296,9 +290,7 @@ int vector_swap_element(vector_p vec, int current_index, int insert_before_index
      *   moving left  (current > insert_before): lands at insert_before_index
      * If the final slot is already current_index, nothing to do. */
     int final_index = (current_index < insert_before_index) ? insert_before_index - 1 : insert_before_index;
-    if(final_index == current_index) {
-        return PLCTAG_STATUS_OK;
-    }
+    if(final_index == current_index) { return PLCTAG_STATUS_OK; }
 
     /* Save the element to move before the shift overwrites its slot. */
     elem = vec->data[current_index];

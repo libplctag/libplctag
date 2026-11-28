@@ -1,0 +1,3 @@
+protocol,delay,mode,op,tags,threads,auto_ms,A g1,B g1,B/A g1
+logix,0.3,auto,read,1000,1,1,155.4,301.2,1.94
+logix,0.3,auto,read,10000,1,1,14.0,17.1,1.22

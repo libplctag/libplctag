@@ -49,11 +49,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/debug.h>
 
 
-void *mem_alloc(int size) {
+void *mem_alloc(int32_t size) {
     if(size <= 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Allocation size must be greater than zero bytes!");
         return NULL;
@@ -68,7 +68,7 @@ void mem_free(const void *mem) {
 }
 
 
-void *mem_realloc(void *orig, int size) {
+void *mem_realloc(void *orig, int32_t size) {
     if(size <= 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "New allocation size must be greater than zero bytes!");
         return NULL;
@@ -78,7 +78,7 @@ void *mem_realloc(void *orig, int size) {
 }
 
 
-void mem_set(void *dest, int c, int size) {
+void mem_set(void *dest, int c, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;
@@ -91,31 +91,6 @@ void mem_set(void *dest, int c, int size) {
 
     // NOLINTNEXTLINE
     memset(dest, c, (size_t)(ssize_t)size);
-}
-
-
-int mem_cmp(void *src1, int src1_size, void *src2, int src2_size) {
-    if(!src1 || src1_size <= 0) {
-        if(!src2 || src2_size <= 0) {
-            /* both are NULL or zero length, but that is "equal" for our purposes. */
-            return 0;
-        } else {
-            /* first one is "less" than second. */
-            return -1;
-        }
-    } else {
-        if(!src2 || src2_size <= 0) {
-            /* first is "greater" than second */
-            return 1;
-        } else {
-            /* both pointers are non-NULL and the lengths are positive. */
-
-            /* short circuit the comparison if the blocks are different lengths */
-            if(src1_size != src2_size) { return (src1_size - src2_size); }
-
-            return memcmp(src1, src2, (size_t)(unsigned int)src1_size);
-        }
-    }
 }
 
 
@@ -150,46 +125,7 @@ int str_cmp(const char *first, const char *second) {
 }
 
 
-char *str_concat_impl(int num_args, ...) {
-    va_list arg_list;
-    int total_length = 0;
-    char *result = NULL;
-    char *tmp = NULL;
-
-    /* first loop to find the length */
-    va_start(arg_list, num_args);
-    for(int i = 0; i < num_args; i++) {
-        tmp = va_arg(arg_list, char *);
-        if(tmp) { total_length += str_length(tmp); }
-    }
-    va_end(arg_list);
-
-    /* make a buffer big enough */
-    total_length += 1;
-
-    result = mem_alloc(total_length);
-    if(!result) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Unable to allocate new string buffer!");
-        return NULL;
-    }
-
-    /* loop to copy the strings */
-    result[0] = 0;
-    va_start(arg_list, num_args);
-    for(int i = 0; i < num_args; i++) {
-        tmp = va_arg(arg_list, char *);
-        if(tmp) {
-            int len = str_length(result);
-            str_copy(&result[len], total_length - len, tmp);
-        }
-    }
-    va_end(arg_list);
-
-    return result;
-}
-
-
-void mem_copy(void *dest, void *src, int size) {
+void mem_copy(void *dest, void *src, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;
@@ -212,7 +148,49 @@ void mem_copy(void *dest, void *src, int size) {
 }
 
 
-void mem_move(void *dest, void *src, int size) {
+/*
+ * A copy that carries the destination's capacity, so the bound is a parameter rather than
+ * something each caller has to remember to check first.  mem_copy() can only reject a
+ * negative size; it cannot see how big dest is, so a caller that computes size from a wire
+ * field is one missing check away from an overflow.  This refuses the copy (writing nothing)
+ * when size will not fit, the same way the rest of the library treats an oversized length,
+ * rather than silently truncating -- a short copy would be a data-integrity bug of its own.
+ *
+ * Returns the number of bytes copied (always == size) on success, or a negative PLCTAG_ERR_*.
+ */
+int32_t mem_copy_bounded(void *dest, int32_t dest_capacity, void *src, int32_t size) {
+    if(!dest) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!src) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source pointer is NULL!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(size < 0 || dest_capacity < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Size (%d) and destination capacity (%d) must not be negative!", size,
+               dest_capacity);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(size > dest_capacity) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Copy of %d bytes does not fit in a destination of %d bytes!", size,
+               dest_capacity);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    if(size == 0) { return 0; }
+
+    // NOLINTNEXTLINE
+    memcpy(dest, src, (size_t)(unsigned int)size);
+
+    return size;
+}
+
+
+void mem_move(void *dest, void *src, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;
@@ -386,60 +364,23 @@ char *str_dup(const char *str) {
  */
 int str_to_int(const char *str, int *val) {
     char *endptr;
-    long int tmp_val;
+    long long tmp_val;
 
     /*
-     * strtol() only ever sets errno, it never clears it, so a stale ERANGE left
-     * behind by any earlier library or system call would be read back below as
-     * this conversion's own failure. Clear it first so the check means something.
+     * No errno: an overflow of long long saturates, and that is out of int range too, so the
+     * range check below catches it.  Writing errno here also trips TSan on macOS, which does
+     * not reset its view of a dead thread's errno when a new thread reuses that memory.
      */
-    errno = 0;
-
-    tmp_val = strtol(str, &endptr, 0);
-
-    if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "strtol returned %ld with errno %d", tmp_val, errno);
-        return -1;
-    }
+    tmp_val = strtoll(str, &endptr, 0);
 
     if(endptr == str) { return -1; }
 
-    /*
-     * long is wider than int on most 64-bit platforms, so strtol() happily returns values
-     * that do not survive the cast.  Without this check "4294967296" converts to zero on
-     * LP64 and the caller has no way to tell that from a real zero.  Reject instead.
-     */
-    if(tmp_val > (long int)INT_MAX || tmp_val < (long int)INT_MIN) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %ld does not fit in an int!", tmp_val);
+    if(tmp_val > (long long)INT_MAX || tmp_val < (long long)INT_MIN) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %lld does not fit in an int!", tmp_val);
         return -1;
     }
 
     *val = (int)tmp_val;
-
-    return 0;
-}
-
-
-/*
- * Convert the characters in the passed string into a float.
- *
- * strtod() rather than strtof() because the Windows C runtime has no strtof().
- */
-int str_to_float(const char *str, float *val) {
-    char *endptr;
-    double tmp_val;
-
-    /* clear errno for the same reason as in str_to_int(). */
-    errno = 0;
-
-    tmp_val = strtod(str, &endptr);
-
-    if(errno == ERANGE && (tmp_val == HUGE_VAL || tmp_val == -HUGE_VAL || tmp_val == 0.0)) { return -1; }
-
-    if(endptr == str) { return -1; }
-
-    /* FIXME - this will truncate long values. */
-    *val = (float)tmp_val;
 
     return 0;
 }

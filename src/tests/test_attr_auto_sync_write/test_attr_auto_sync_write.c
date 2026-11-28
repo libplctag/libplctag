@@ -40,7 +40,7 @@
 
 #include "compat_utils.h"
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -54,8 +54,8 @@
 
 #define DELAY_MS (800)
 
-/* The write must not go out immediately, nor later than the delay plus the tickler scan
- * interval and one network round trip. */
+/* The write must not go out immediately, nor later than the delay plus one network round
+ * trip. */
 #define MIN_DELAY_MS (DELAY_MS / 2)
 #define MAX_DELAY_MS (DELAY_MS * 3)
 
