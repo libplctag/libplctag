@@ -73,7 +73,10 @@ typedef enum {
     ATTR_TYPE_BYTES,
 
     /* ATTR_TYPE_BYTES holding NUL-terminated text.  The reported size includes the terminator. */
-    ATTR_TYPE_STRING
+    ATTR_TYPE_STRING,
+
+    /* a 64-bit integer, read with plc_tag_get_int64_attribute() through get_int64. */
+    ATTR_TYPE_INT64
 } attr_val_type_t;
 
 typedef struct attr_def_t attr_def_t;
@@ -85,6 +88,7 @@ struct attr_def_t {
 
     union {
         int32_t (*get_int)(plc_tag_p tag, int32_t *result);
+        int32_t (*get_int64)(plc_tag_p tag, int64_t *result);
         int32_t (*get_bytes)(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
     };
 
@@ -260,6 +264,9 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
      * own field holds the reference; this is a copy for plc_tag_create_from_tag(), which  \
      * passes the source tag to create_func.  Set once during create. */                   \
     void *conn;                              \
+    /* the connection's statistics, on @connection tags only; NULL on other tags.  Set once    \
+     * during create; lives as long as the connection the tag holds. */                          \
+    struct conn_stats_t *conn_stats;         \
     tag_create_function create_func;         \
     uint8_t *data;                           \
     lib_instance_p instance;                 \

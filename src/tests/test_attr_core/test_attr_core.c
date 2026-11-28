@@ -67,6 +67,23 @@ static void check_get(int32_t tag, const char *attrib, int32_t expected) {
 }
 
 
+/* a default that only comes back whole if nothing truncates it to 32 bits. */
+#define INT64_SENTINEL ((int64_t)0x123456789ABCDEF)
+
+/* No attribute is 64-bit yet, so every call here must return the default untouched. */
+static void check_get64_refused(int32_t tag, const char *attrib) {
+    int64_t actual = plc_tag_get_int64_attribute(tag, attrib, INT64_SENTINEL);
+
+    if(actual == INT64_SENTINEL) {
+        printf("\tOK: get64 \"%s\" returned the default.\n", attrib ? attrib : "(null)");
+    } else {
+        printf("\tFAIL: get64 \"%s\" = %lld, expected the default %lld.\n", attrib ? attrib : "(null)", (long long)actual,
+               (long long)INT64_SENTINEL);
+        failures++;
+    }
+}
+
+
 static void check_set(int32_t tag, const char *attrib, int32_t value, int32_t expected_rc) {
     int32_t rc = plc_tag_set_int_attribute(tag, attrib, value);
 
@@ -182,6 +199,13 @@ static void test_library_scope(void) {
     check_attr_size(0, "version_major", (int32_t)sizeof(int32_t));
     check_attr_size(0, "boodleflokker", PLCTAG_ERR_UNSUPPORTED);
 
+    printf("The 64-bit getter refuses 32-bit and unknown library attributes.\n");
+
+    check_get64_refused(0, "version_major");
+    check_get64_refused(0, "boodleflokker");
+    check_get64_refused(0, "");
+    check_get64_refused(0, NULL);
+
     printf("A tag attribute is not a library attribute.\n");
 
     check_get(0, "size", INT_MIN);
@@ -261,6 +285,15 @@ int main(void) {
     /* an unknown name has no size, and a bad argument is rejected before the lookup. */
     check_attr_size(tag, "boodleflokker", PLCTAG_ERR_UNSUPPORTED);
     check_attr_size(tag, "", PLCTAG_ERR_BAD_PARAM);
+
+    printf("The 64-bit getter refuses 32-bit, byte and unknown tag attributes.\n");
+
+    check_get64_refused(tag, "read_cache_ms");
+    check_get64_refused(tag, "size");
+    check_get64_refused(tag, "int32_byte_order");
+    check_get64_refused(tag, "boodleflokker");
+    check_get64_refused(tag, "");
+    check_get64_refused(-1, "read_cache_ms");
 
     printf("Creation-time values are readable and read-only.\n");
 

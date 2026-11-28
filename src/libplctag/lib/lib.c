@@ -2633,6 +2633,71 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
 }
 
 
+LIB_EXPORT int64_t plc_tag_get_int64_attribute(int32_t id, const char *attrib_name, int64_t default_value) {
+    int64_t res = default_value;
+    plc_tag_p tag = NULL;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!attrib_name || str_length(attrib_name) == 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute name must not be null or zero-length!");
+        return default_value;
+    }
+
+    /* get library attributes */
+    if(id == 0) {
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(def && def->type == ATTR_TYPE_INT64 && def->get_int64) {
+            int64_t value = 0;
+
+            res = (def->get_int64(NULL, &value) == PLCTAG_STATUS_OK ? value : default_value);
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not a 64-bit attribute at the library level!",
+                   attrib_name);
+            res = default_value;
+        }
+
+        return res;
+    }
+
+    tag = lookup_tag(id);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return default_value;
+    }
+
+    critical_block(&tag->api_mutex) {
+        const attr_def_t *def = attr_find(tag, attrib_name);
+
+        if(!def) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Unsupported attribute \"%s\"!", attrib_name);
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+        } else if(def->type != ATTR_TYPE_INT64) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" does not hold a 64-bit integer value!", attrib_name);
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+        } else if(def->get_int64) {
+            int64_t value = 0;
+            int32_t rc = def->get_int64(tag, &value);
+
+            tag->status = (int8_t)rc;
+            res = (rc == PLCTAG_STATUS_OK ? value : default_value);
+        } else {
+            /* the name exists but is write only, or the protocol suppressed it. */
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return res;
+}
+
+
 LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, int new_value) {
     int res = PLCTAG_ERR_NOT_FOUND;
     plc_tag_p tag = NULL;
@@ -2783,6 +2848,7 @@ LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
         }
 
         if(def->type == ATTR_TYPE_INT) { return (int)sizeof(int32_t); }
+        if(def->type == ATTR_TYPE_INT64) { return (int)sizeof(int64_t); }
 
         return (def->get_bytes_size ? (int)def->get_bytes_size(NULL) : PLCTAG_ERR_UNSUPPORTED);
     }
@@ -2800,6 +2866,8 @@ LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
         if(!def) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not known to the library!", attrib_name);
             rc = PLCTAG_ERR_UNSUPPORTED;
+        } else if(def->type == ATTR_TYPE_INT64) {
+            rc = (int)sizeof(int64_t);
         } else if(def->type != ATTR_TYPE_INT) {
             if(def->get_bytes_size) {
                 rc = (int)def->get_bytes_size(tag);

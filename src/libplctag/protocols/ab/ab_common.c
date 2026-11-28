@@ -34,6 +34,7 @@
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
+#include <libplctag/lib/conn_stats.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab.h>
@@ -377,6 +378,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             return (plc_tag_p)tag;
         }
 
+        /* counted while the tag holds the session; the destructor takes it off. */
+        conn_stats_tag_added(&tag->session->stats);
+
         /* a clone shares the connection, so it cannot ask for the other kind of messaging. */
         if(plc && session_connected_conflicts(tag->session, tag->use_connected_msg)) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "use_connected_msg=%d conflicts with the source's connection!",
@@ -386,6 +390,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         }
     } else {
         int32_t session_rc = session_find_or_create(&tag->session, attribs, NULL);
+
+        /* counted while the tag holds the session; the destructor takes it off. */
+        if(tag->session) { conn_stats_tag_added(&tag->session->stats); }
 
         if(session_rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
@@ -1033,6 +1040,7 @@ void ab_tag_destroy(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Removing tag from session.");
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing session reference of tag %" PRId32 ".",
                tag->tag_id);
+        conn_stats_tag_removed(&session->stats);
         rc_dec(session);
         tag->session = NULL;
     } else {

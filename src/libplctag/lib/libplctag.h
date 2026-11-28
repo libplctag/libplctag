@@ -591,11 +591,17 @@ typedef enum {
 LIB_EXPORT int plc_tag_get_int_attribute(int32_t tag, const char *attrib_name, int default_value);
 LIB_EXPORT int plc_tag_set_int_attribute(int32_t tag, const char *attrib_name, int new_value);
 
+/*
+ * Return the value of a 64-bit integer attribute, or default_value if the attribute is unknown or
+ * is not a 64-bit integer.  32-bit integer attributes are read with plc_tag_get_int_attribute().
+ */
+LIB_EXPORT int64_t plc_tag_get_int64_attribute(int32_t tag, const char *attrib_name, int64_t default_value);
+
 LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
 
 /*
  * Return the size in bytes of an attribute's value, or a negative error code.  An integer
- * attribute reports the width of an integer.  A byte array attribute reports its current
+ * attribute reports the width of its integer: 4, or 8 for a 64-bit one.  A byte array attribute reports its current
  * length, which is the buffer size to pass to plc_tag_get_byte_array_attribute().
  */
 LIB_EXPORT int plc_tag_get_attribute_size(int32_t tag, const char *attrib_name);

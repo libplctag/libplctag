@@ -8,6 +8,8 @@
 - `destroy_tag_after_idle_sec` destroys a tag after it goes this many seconds without a read or write.
 - `connection_retry_max_delay_ms` caps the wait between reconnect attempts.
 - `plc_tag_get_attribute_size()` returns the buffer size an attribute needs.
+- `plc_tag_get_int64_attribute()` reads 64-bit integer attributes.
+- `@connection` tags report connection statistics as attributes: connect, failure and idle disconnect counts, time connected, retry wait, tag count, requests, replies, bytes and tag operations (in total and since the latest connect), timeouts, error replies, requests in flight and response times.  AB and Omron also report the Forward Open's connection size and both connection IDs.  Reading them never waits on the connection's IO thread.  They are for information only and may change or be removed in any release.
 - The `size` attribute can be set: `plc_tag_set_int_attribute(tag, "size", n)` resizes the tag's buffer, as `plc_tag_set_size()` does.
 - Attributes set in the tag string can be read back after create: `plc`, `gateway`, `gateway_port`, `path`, `use_connected_msg`, `allow_packing`, `connection_group_id`, `find_or_create_tag`, `conn_only_use_old_forward_open`, the `str_*` attributes and the byte orders.
 - Attribute names ignore case and `_`, in tag strings and in the attribute functions: `elem_count`, `ElemCount` and `ELEM_COUNT` are the same.

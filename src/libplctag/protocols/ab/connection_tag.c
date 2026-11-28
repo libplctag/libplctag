@@ -33,6 +33,7 @@
 
 #include "connection_tag.h"
 #include <libplctag/protocols/ab/ab.h>
+#include <libplctag/lib/conn_stats.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/ab/tag.h>
@@ -68,6 +69,9 @@ static int32_t connection_get_only_use_old_forward_open(plc_tag_p tag, int32_t *
 static int32_t connection_set_only_use_old_forward_open(plc_tag_p tag, int32_t value);
 static int32_t connection_get_io_events(plc_tag_p tag, int32_t *result);
 static int32_t connection_set_io_events(plc_tag_p tag, int32_t value);
+static int32_t connection_get_forward_open_size(plc_tag_p tag, int32_t *result);
+static int32_t connection_get_connection_id_ot(plc_tag_p tag, int64_t *result);
+static int32_t connection_get_connection_id_to(plc_tag_p tag, int64_t *result);
 static void ab_connection_tag_destructor(void *ptr);
 static const char *conn_status_name(int32_t conn_status);
 
@@ -101,6 +105,21 @@ static const attr_def_t connection_tag_attribs[] = {
      .description = "1 raises read and write events for the session's IO on this tag, 0 does not.",
      .get_int = connection_get_io_events,
      .set_int = connection_set_io_events},
+
+    {.name = "forwardopensize",
+     .type = ATTR_TYPE_INT,
+     .description = "The connection size the PLC accepted in the open Forward Open; 0 while there is none.",
+     .get_int = connection_get_forward_open_size},
+
+    {.name = "connectionidot",
+     .type = ATTR_TYPE_INT64,
+     .description = "The O->T connection ID the PLC gave the open Forward Open, which requests carry; 0 while there is none.",
+     .get_int64 = connection_get_connection_id_ot},
+
+    {.name = "connectionidto",
+     .type = ATTR_TYPE_INT64,
+     .description = "The T->O connection ID of the open Forward Open, which replies carry; 0 while there is none.",
+     .get_int64 = connection_get_connection_id_to},
 
     {.name = NULL},
 };
@@ -152,8 +171,14 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
             tag->status = PLCTAG_ERR_NOT_ALLOWED;
             return (plc_tag_p)tag;
         }
+
+        /* counted while the tag holds the session; the destructor takes it off. */
+        conn_stats_tag_added(&tag->session->stats);
     } else {
         int32_t session_rc = session_find_or_create(&tag->session, attribs, &new_session);
+
+        /* counted while the tag holds the session; the destructor takes it off. */
+        if(tag->session) { conn_stats_tag_added(&tag->session->stats); }
 
         if(session_rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_INFO, 0, "Unable to create session!");
@@ -164,6 +189,7 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
 
     tag->conn = tag->session;
     tag->create_func = ab_tag_create;
+    tag->conn_stats = &tag->session->stats;
 
     if(new_session) {
         /* We just created this session (session_find_or_create() initializes
@@ -281,6 +307,33 @@ static int32_t connection_get_connection_status(plc_tag_p tag, int32_t *result) 
     return PLCTAG_STATUS_OK;
 }
 
+static int32_t connection_get_forward_open_size(plc_tag_p tag, int32_t *result) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    *result = (conn_tag->session ? atomic_get_int32(&conn_tag->session->fo_conn_size) : 0);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t connection_get_connection_id_ot(plc_tag_p tag, int64_t *result) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    *result = (conn_tag->session ? atomic_get_int64(&conn_tag->session->fo_conn_id_ot) : 0);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t connection_get_connection_id_to(plc_tag_p tag, int64_t *result) {
+    ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
+
+    *result = (conn_tag->session ? atomic_get_int64(&conn_tag->session->fo_conn_id_to) : 0);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 /* no session means the session that will be created uses the default. */
 static int32_t connection_get_inactivity_timeout_ms(plc_tag_p tag, int32_t *result) {
     ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
@@ -347,6 +400,7 @@ static void ab_connection_tag_destructor(void *ptr) {
 
     if(tag->session) {
         pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, tag->tag_id, "Removing tag from session.");
+        conn_stats_tag_removed(&tag->session->stats);
         rc_dec(tag->session);
         tag->session = NULL;
     } else {

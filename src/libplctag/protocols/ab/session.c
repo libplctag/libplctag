@@ -33,6 +33,7 @@
 
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/conn_stats.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
@@ -117,6 +118,7 @@ typedef struct {
     bool want_reply;
     int32_t rc; /* why it failed */
     bool net_error; /* it failed on the wire: the socket is no good any more. */
+    int64_t start_us; /* when it was started, for the response time. */
 } exchange_t;
 
 
@@ -792,6 +794,10 @@ cip_conn_p session_create_unsafe(int max_payload_capacity, const char *host, con
     session->is_dhp = is_dhp;
     session->dhp_dest = dhp_dest;
     atomic_init_int32(&session->connection_status, PLCTAG_CONN_STATUS_DOWN);
+    conn_stats_init(&session->stats);
+    atomic_init_int32(&session->fo_conn_size, 0);
+    atomic_init_int64(&session->fo_conn_id_ot, 0);
+    atomic_init_int64(&session->fo_conn_id_to, 0);
     atomic_init_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
 
     /* conn_status_ring_write_idx always points at the ring slot holding the
@@ -1048,6 +1054,11 @@ int session_close_socket(cip_conn_p session) {
 
     if(session->sock) { socket_close(session->sock); }
 
+    /* a Forward Open does not outlive its socket. */
+    atomic_set_int32(&session->fo_conn_size, 0);
+    atomic_set_int64(&session->fo_conn_id_ot, 0);
+    atomic_set_int64(&session->fo_conn_id_to, 0);
+
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 
     return PLCTAG_STATUS_OK;
@@ -1283,6 +1294,7 @@ static inline void session_set_connection_status(cip_conn_p session, int32_t new
         atomic_set_int32(&session->connection_status_reason, new_reason);
         atomic_set_int32(&session->connection_status, new_status);
         if(old_status != new_status) {
+            conn_stats_status_changed(&session->stats, old_status, new_status);
             session_publish_event(session, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, new_reason);
         }
     }
@@ -1462,6 +1474,10 @@ static int fo_step(cip_conn_p session, session_sm_t *sm) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0,
                    "Forward Open succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
                    session->orig_connection_id, session->targ_connection_id, session->max_payload_size);
+
+            atomic_set_int32(&session->fo_conn_size, (int32_t)session->max_payload_guess);
+            atomic_set_int64(&session->fo_conn_id_ot, (int64_t)session->targ_connection_id);
+            atomic_set_int64(&session->fo_conn_id_to, (int64_t)session->orig_connection_id);
 
             fo->state = FO_START;
             atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
@@ -1781,6 +1797,7 @@ static void close_socket_phase(cip_conn_p session, session_sm_t *sm) {
     backoff_set_max_ms(&sm->retry_backoff, atomic_get_int32(&session->connection_retry_max_delay_ms));
     retry_wait_ms = backoff_retry_wait_ms(&sm->retry_backoff, sm->now);
     sm->timeout_time = sm->now + retry_wait_ms;
+    conn_stats_retry_wait(&session->stats, retry_wait_ms);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.",
            sm->retry_backoff.attempts, retry_wait_ms);
@@ -2253,6 +2270,7 @@ static int start_batch(cip_conn_p session, session_sm_t *sm) {
 /* hand each request its reply.  One that cannot take it goes back on the queue with the rest. */
 static int deliver_batch(cip_conn_p session, req_batch_t *b) {
     int rc = PLCTAG_STATUS_OK;
+    int32_t delivered = 0;
 
     for(int i = 0; i < b->count; i++) {
         if((rc = unpack_response(session, b->reqs[i], i, b->packed)) != PLCTAG_STATUS_OK) {
@@ -2260,10 +2278,14 @@ static int deliver_batch(cip_conn_p session, req_batch_t *b) {
             break;
         }
 
+        delivered++;
+
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, b->reqs[i]->tag_id, "rc_dec: Releasing request reference.");
         atomic_set_bool(&b->reqs[i]->in_session, false);
         b->reqs[i] = rc_dec(b->reqs[i]);
     }
+
+    conn_stats_tag_ops(&session->stats, delivered, 0);
 
     /* tickle the main tickler thread to note that we have responses. */
     plc_tag_tickler_wake();
@@ -2469,6 +2491,10 @@ int unpack_response(cip_conn_p session, ab_request_p request, int sub_packet, bo
     mem_set(request->data, 0, request->request_capacity);
 
     mem_copy(request->data, pkt_start, pkt_len);
+
+    /* the CIP general status, read here while the reply is still ours.  0x06 is a partial
+     * transfer, which only asks for the next fragment. */
+    if(pkt_len > 2 && pkt_start[2] != 0x00 && pkt_start[2] != 0x06) { conn_stats_tag_ops(&session->stats, 0, 1); }
 
     /* notify the reading thread that the request is ready */
     spin_block(&request->lock) {
@@ -2812,9 +2838,11 @@ int send_some(cip_conn_p session, int timeout_ms) {
     }
 
     session->data_offset += (uint32_t)rc;
+    conn_stats_bytes_sent(&session->stats, rc);
 
     if(session->data_offset < session->data_size) { return PLCTAG_STATUS_PENDING; }
 
+    conn_stats_request_sent(&session->stats);
     session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
 
     return PLCTAG_STATUS_OK;
@@ -2867,6 +2895,7 @@ int recv_some(cip_conn_p session, int timeout_ms) {
     }
 
     session->data_offset += (uint32_t)rc;
+    conn_stats_bytes_received(&session->stats, rc);
 
     /* the header just completed: now we know how much more there is. */
     if(session->data_offset == sizeof(eip_encap) && data_needed == sizeof(eip_encap)) {
@@ -2966,6 +2995,8 @@ int recv_finish(cip_conn_p session) {
 void exchange_start(cip_conn_p session, exchange_t *ex, bool want_reply) {
     ex->want_reply = want_reply;
     ex->deadline = time_ms() + SESSION_DEFAULT_TIMEOUT;
+    ex->start_us = time_us();
+    conn_stats_requests_in_flight(&session->stats, 1);
     ex->rc = send_begin(session);
     ex->net_error = false;
     ex->state = EX_SEND;
@@ -2982,6 +3013,7 @@ ex_result_t exchange_step(cip_conn_p session, exchange_t *ex) {
         if(rc == PLCTAG_STATUS_OK) {
             if(!ex->want_reply) {
                 ex->state = EX_IDLE;
+                conn_stats_requests_in_flight(&session->stats, 0);
                 return EX_DONE;
             }
 
@@ -2999,6 +3031,11 @@ ex_result_t exchange_step(cip_conn_p session, exchange_t *ex) {
             ex->rc = recv_finish(session);
             /* a reply to something else means the stream is out of step: as bad as a broken socket. */
             ex->net_error = (ex->rc != PLCTAG_STATUS_OK && ex->rc != PLCTAG_ERR_BAD_STATUS);
+            conn_stats_requests_in_flight(&session->stats, 0);
+            if(!ex->net_error) {
+                conn_stats_response_received(&session->stats);
+                conn_stats_response_time(&session->stats, time_us() - ex->start_us);
+            }
             return (ex->rc == PLCTAG_STATUS_OK) ? EX_DONE : EX_FAILED;
         }
     }
@@ -3006,6 +3043,7 @@ ex_result_t exchange_step(cip_conn_p session, exchange_t *ex) {
     if(rc == PLCTAG_STATUS_PENDING && time_ms() >= ex->deadline) {
         rc = PLCTAG_ERR_TIMEOUT;
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Timed out waiting on the socket!");
+        conn_stats_request_timeout(&session->stats);
         session_publish_event(session,
                               (ex->state == EX_SEND) ? TAG_CONN_EVENT_SEND_REQUEST_COMPLETED :
                                                        TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED,
@@ -3018,6 +3056,7 @@ ex_result_t exchange_step(cip_conn_p session, exchange_t *ex) {
     ex->net_error = (ex->rc == PLCTAG_STATUS_OK);
     ex->state = EX_IDLE;
     ex->rc = rc;
+    conn_stats_requests_in_flight(&session->stats, 0);
 
     return EX_FAILED;
 }

@@ -181,6 +181,7 @@ REQUIRED_EXECUTABLES = [
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy", "test_request_churn",
     "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy", "test_find_or_create_tag",
     "test_tag_listing_reread", "test_create_fail_callback", "perf_benchmark", "test_reconnect_cycles",
+    "test_conn_stats",
 ]
 
 
@@ -234,6 +235,14 @@ def build_manifest() -> list[Test]:
         test("auto-destroy idle tags (ControlLogix)",
              [exe("test_auto_destroy"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]"]),
+        # Its own connection group: the counts and tag_count must not see other tests' traffic.
+        test("connection statistics: traffic, times, tag count (ControlLogix)",
+             [exe("test_conn_stats"), "--mode=basic", "--forward-open",
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&connection_group_id=7301&elem_count=1&name=TestBigArray[0]"]),
+        test("connection statistics: error responses (ControlLogix)",
+             [exe("test_conn_stats"), "--mode=errors",
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&connection_group_id=7302&elem_count=1&name=TestBigArray[0]",
+              "--error-attrs=name=No_Such_Tag&elem_count=1"]),
         test("find_or_create_tag finds or creates a shared tag (ControlLogix)",
              [exe("test_find_or_create_tag"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",

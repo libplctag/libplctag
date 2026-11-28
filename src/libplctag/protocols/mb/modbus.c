@@ -34,6 +34,7 @@
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
+#include <libplctag/lib/conn_stats.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/mb/modbus.h>
 #include <limits.h>
@@ -163,6 +164,9 @@ struct modbus_plc_t {
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
     atomic_int32_t connection_retry_max_delay_ms;    /* the longest reconnect wait, milliseconds */
 
+    /* statistics read by @connection tags; the handler thread writes them. */
+    conn_stats_t stats;
+
     /* data */
     int read_data_len;
     uint8_t read_data[PLC_READ_DATA_LEN];
@@ -269,7 +273,7 @@ struct modbus_tag_t {
 
     /* request timing - tracks time from entering REQUEST state to receiving response */
     int64_t request_start_time;
-    int64_t request_sent_time; /* timestamp when request was sent over wire */
+    int64_t request_sent_time; /* time_us() when the request was built, for the response time */
 
     /* data for the tag. */
     int elem_count;
@@ -740,6 +744,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
                     atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT);
                     atomic_init_int32(&(*plc)->connection_retry_max_delay_ms, RETRY_WAIT_MAX_MS);
                     atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
+                    conn_stats_init(&(*plc)->stats);
 
                     /* conn_event_ring_write_idx always points at the ring slot holding the
                      * current state, not the next free slot: mb_plc_publish_event() dedups
@@ -1040,6 +1045,7 @@ static void retry_later(modbus_plc_p plc, backoff_t *retry_backoff, int64_t *err
     backoff_set_max_ms(retry_backoff, atomic_get_int32(&plc->connection_retry_max_delay_ms));
     retry_wait_ms = backoff_retry_wait_ms(retry_backoff, time_ms());
     *err_delay_until = time_ms() + retry_wait_ms;
+    conn_stats_retry_wait(&plc->stats, retry_wait_ms);
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.",
            retry_backoff->attempts, retry_wait_ms);
@@ -1081,6 +1087,9 @@ THREAD_FUNC(modbus_plc_handler) {
         rc = tickle_all_tags(plc, &wait_time_ms);
         tickle_end_us = time_us();
         plc->cycle_tickle_time_sum_us += (tickle_end_us - tickle_start_us);
+
+        /* the tickle sends and completes requests, so publish the count before any wait. */
+        conn_stats_requests_in_flight(&plc->stats, atomic_get_int32(&plc->pending_request_count));
 
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s tickling tags!", plc_tag_decode_error(rc));
@@ -1307,6 +1316,7 @@ THREAD_FUNC(modbus_plc_handler) {
                     mb_plc_publish_event(plc, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK);
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Request sent, going to back to state PLC_READY.");
                     plc->cycle_count++;
+                    conn_stats_request_sent(&plc->stats);
 
                     atomic_set_bool(&plc->flags.request_ready, false);
                     plc->write_data_len = 0;
@@ -1335,6 +1345,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Response ready, going back to PLC_READY state.");
                     mb_plc_publish_event(plc, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, PLCTAG_STATUS_OK);
+                    conn_stats_response_received(&plc->stats);
                     atomic_set_bool(&plc->flags.response_ready, true);
                     plc->state = PLC_READY;
                 } else if(rc == PLCTAG_STATUS_PENDING) {
@@ -1869,6 +1880,7 @@ static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
 
         /* Store the transaction ID in the tag for matching responses */
         tag->pending_transaction_id = tag->seq_id;
+        tag->request_sent_time = time_us();
 
         /* Increment in-flight counter */
         atomic_add_int32(&plc->pending_request_count, 1);
@@ -1935,6 +1947,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
      * RESPONSE-state tags back to REQUEST state when the connection drops.
      */
     rc = check_read_response(plc, tag);
+    conn_stats_response_time(&plc->stats, time_us() - tag->request_sent_time);
+
     switch(rc) {
         case PLCTAG_STATUS_PENDING: /* send the next piece */
             /* Partial response: need to send another request for remaining data.
@@ -1969,6 +1983,7 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
             }
 
             tag->status = (int8_t)rc;
+            conn_stats_tag_ops(&plc->stats, 1, (rc != PLCTAG_STATUS_OK) ? 1 : 0);
 
             decrement_request_count(plc);
 
@@ -2097,6 +2112,7 @@ static int tag_op_write_request(modbus_plc_p plc, modbus_tag_p tag) {
 
         /* Store the transaction ID in the tag for matching responses */
         tag->pending_transaction_id = tag->seq_id;
+        tag->request_sent_time = time_us();
 
         /* Increment in-flight counter */
         atomic_add_int32(&plc->pending_request_count, 1);
@@ -2157,6 +2173,7 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
      * RESPONSE-state tags back to REQUEST state when the connection drops.
      */
     rc = check_write_response(plc, tag);
+    conn_stats_response_time(&plc->stats, time_us() - tag->request_sent_time);
 
     switch(rc) {
         case PLCTAG_STATUS_PENDING: /* send the next piece */
@@ -2198,6 +2215,7 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
             tag->write_complete = 1;
             tag->write_in_flight = 0;
             tag->status = (int8_t)rc;
+            conn_stats_tag_ops(&plc->stats, 1, (rc != PLCTAG_STATUS_OK) ? 1 : 0);
 
             /* Reschedule or remove from active_tags.
              * If a dirty write arrived while this write was in-flight, move the tag
@@ -2356,6 +2374,7 @@ int receive_response(modbus_plc_p plc) {
         if(rc >= 0) {
             /* got data! Or got nothing, but no error. */
             plc->read_data_len += rc;
+            conn_stats_bytes_received(&plc->stats, rc);
 
             pdebug_dump_bytes(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, plc->read_data, plc->read_data_len);
         } else if(rc == PLCTAG_ERR_TIMEOUT) {
@@ -2461,6 +2480,7 @@ int send_request(modbus_plc_p plc) {
     if(rc >= 0) {
         plc->write_data_offset += rc;
         data_left = plc->write_data_len - plc->write_data_offset;
+        conn_stats_bytes_sent(&plc->stats, rc);
     } else if(rc == PLCTAG_ERR_TIMEOUT) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Done.  Timeout writing to socket.");
     } else {
@@ -3341,6 +3361,7 @@ static int add_tag(modbus_plc_p plc, modbus_tag_p tag) {
     critical_block(&plc->mutex) {
         /* Count all tags (active + idle) for terminate detection. */
         atomic_add_int32(&plc->tag_count, 1);
+        conn_stats_tag_added(&plc->stats);
 
         /* Tags with auto-sync read configured fire their first read immediately. */
         if(tag->auto_sync_read_ms > 0) {
@@ -3383,6 +3404,7 @@ static int remove_tag(modbus_plc_p plc, modbus_tag_p tag) {
 
         /* Decrement total tag count. */
         atomic_add_int32(&plc->tag_count, -1);
+        conn_stats_tag_removed(&plc->stats);
         remaining = atomic_get_int32(&plc->tag_count);
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Tag removed, count now %" PRId32 ".", remaining);
     }
@@ -4087,7 +4109,10 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
     critical_block(&plc->mutex) {
         int32_t old_status = atomic_get_int32(&plc->connection_status);
         atomic_set_int32(&plc->connection_status, new_status);
-        if(old_status != new_status) { mb_plc_publish_event(plc, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK); }
+        if(old_status != new_status) {
+            conn_stats_status_changed(&plc->stats, old_status, new_status);
+            mb_plc_publish_event(plc, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
+        }
     }
 }
 
@@ -4267,6 +4292,7 @@ static void mb_connection_tag_destructor(void *ptr) {
 
     if(dt->plc) {
         pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_DETAIL, dt->tag_id, "Releasing PLC reference.");
+        conn_stats_tag_removed(&dt->plc->stats);
         rc_dec(dt->plc);
         dt->plc = NULL;
     }
@@ -4326,6 +4352,9 @@ static plc_tag_p mb_connection_tag_create(attr attribs,
         rc = find_or_create_plc(attribs, &dt->plc, &plc_is_new);
     }
 
+    /* counted while the tag holds the PLC; the destructor takes it off. */
+    if(dt->plc) { conn_stats_tag_added(&dt->plc->stats); }
+
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, 0, "Unable to find or create PLC, error %s!", plc_tag_decode_error(rc));
         dt->status = (int8_t)rc;
@@ -4335,6 +4364,7 @@ static plc_tag_p mb_connection_tag_create(attr attribs,
 
     dt->conn = dt->plc;
     dt->create_func = mb_tag_create;
+    dt->conn_stats = &dt->plc->stats;
 
     if(plc_is_new) {
         /* We just created this PLC (find_or_create_plc() initializes connection_status to

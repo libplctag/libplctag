@@ -359,6 +359,64 @@ static void test_byte_order_no_leak(void) {
 }
 
 
+/* plc_tag_get_int64_attribute(): no protocol has a 64-bit attribute yet, so the test gives a
+ * system tag a copy of its vtable whose table holds one. */
+#define TEST_INT64_VALUE (INT64_C(0x123456789ABCDEF0))
+#define TEST_INT64_DEFAULT (INT64_C(-42))
+
+static int32_t test_get_int64_ok(plc_tag_p tag, int64_t *result) {
+    (void)tag;
+    *result = TEST_INT64_VALUE;
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t test_get_int64_fails(plc_tag_p tag, int64_t *result) {
+    (void)tag;
+    (void)result;
+    return PLCTAG_ERR_NOT_FOUND;
+}
+
+static const attr_def_t test_int64_attribs[] = {
+    {.name = "testint64", .type = ATTR_TYPE_INT64, .description = "test", .get_int64 = test_get_int64_ok},
+    {.name = "testint64fails", .type = ATTR_TYPE_INT64, .description = "test", .get_int64 = test_get_int64_fails},
+    {.name = NULL},
+};
+
+static void test_get_int64_attribute(void) {
+    int32_t id = plc_tag_create(SYSTEM_TAG, 0);
+    plc_tag_p tag = lookup_tag(id);
+    struct tag_vtable_t test_vtable;
+    tag_vtable_p saved_vtable = NULL;
+
+    printf("plc_tag_get_int64_attribute() reads a 64-bit attribute whole.\n");
+
+    if(!tag || !tag->vtable) {
+        check(tag && tag->vtable, "system tag");
+        return;
+    }
+
+    saved_vtable = tag->vtable;
+    test_vtable = *saved_vtable;
+    test_vtable.attribs = test_int64_attribs;
+    tag->vtable = &test_vtable;
+
+    check(plc_tag_get_int64_attribute(id, "test_int64", TEST_INT64_DEFAULT) == TEST_INT64_VALUE, "int64: value read whole");
+    check(plc_tag_status(id) == PLCTAG_STATUS_OK, "int64: status OK after a good read");
+    check(plc_tag_get_attribute_size(id, "test_int64") == (int)sizeof(int64_t), "int64: size is 8");
+
+    /* the 32-bit getter does not truncate a 64-bit value; it refuses it. */
+    check(plc_tag_get_int_attribute(id, "test_int64", -7) == -7, "int64: the 32-bit getter refuses it");
+
+    /* a getter's error comes back as the default and the status. */
+    check(plc_tag_get_int64_attribute(id, "test_int64_fails", TEST_INT64_DEFAULT) == TEST_INT64_DEFAULT,
+          "int64: a failing getter returns the default");
+
+    tag->vtable = saved_vtable;
+    rc_dec_impl(__func__, __LINE__, tag);
+    plc_tag_destroy(id);
+}
+
+
 int main(void) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
     (void)plc_tag_register_logger(logger);
@@ -367,6 +425,7 @@ int main(void) {
     test_set_string_busy();
     test_logger_log_level();
     test_byte_order_no_leak();
+    test_get_int64_attribute();
 
     /* last: under UBSan the C6 defect aborts the run. */
     test_wake_null_tag();

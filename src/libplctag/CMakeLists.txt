@@ -34,6 +34,8 @@ add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/protocols/ab")
 # set up the library sources
 set ( libplctag_SRCS "${CMAKE_CURRENT_LIST_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/lib/init.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/conn_stats.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/lib/conn_stats.h"
                      "${CMAKE_CURRENT_LIST_DIR}/lib/libplctag.h"
                      "${CMAKE_CURRENT_LIST_DIR}/lib/lib.c"
                      "${CMAKE_CURRENT_LIST_DIR}/lib/tag.h"

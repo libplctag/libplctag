@@ -314,6 +314,7 @@ REQUIRED_EXECUTABLES = [
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
     "test_bit_write", "test_auto_destroy", "test_reconnect_cycles", "test_find_or_create_tag", "test_many_tags", "test_request_churn",
+    "test_conn_stats",
 ]
 
 
@@ -871,6 +872,26 @@ def build_manifest() -> Manifest:
               F, server=cip_ops_server(300))
     sec.test("plc_tag_set_size fails with BUSY while a read or write is in flight",
               [exe("test_cip_ops"), "--mode=set-size-busy", cip_ops_base], F, server=cip_ops_server(300))
+    conn_stats_tag = f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]"
+    sec.test("connection statistics: traffic, times, tag count (AB ControlLogix)",
+              [exe("test_conn_stats"), "--mode=basic", "--forward-open", conn_stats_tag], F, server=cip_ops_server(0))
+    sec.test("connection statistics: requests in flight (AB ControlLogix)",
+              [exe("test_conn_stats"), "--mode=in-flight", conn_stats_tag], F, server=cip_ops_server(300))
+    sec.test("connection statistics: error responses (AB ControlLogix)",
+              [exe("test_conn_stats"), "--mode=errors", conn_stats_tag, "--error-attrs=name=No_Such_Tag&elem_count=1"],
+              F, server=cip_ops_server(0))
+    sec.test("connection statistics: idle disconnect and reconnect (AB ControlLogix)",
+              [exe("test_conn_stats"), "--mode=idle", "--forward-open", conn_stats_tag], T, server=cip_ops_server(0))
+    sec.test("connection statistics: request timeout (AB ControlLogix)",
+              [exe("test_conn_stats"), "--mode=timeout", conn_stats_tag], T,
+              server=ServerSpec(exe_path=exe("ab_server"),
+                                args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                                               "--tag=TestBigArray:DINT[2000]", "--no_reply=1"],
+                                startup_wait_s=1))
+    sec.test("connection statistics: failed connects and retry wait (AB ControlLogix)",
+              [exe("test_conn_stats"), "--mode=dead",
+               "--conn-tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@connection"],
+              T, server=None, ports_needed=1)
     sec.test("an async read fills the read cache and hits do not restart its window",
               [exe("test_cip_ops"), "--mode=read-cache", cip_ops_base], F, server=cip_ops_server(0))
     sec.test("create-from-tag API (20 permutation tests with AB/EIP)",
@@ -1939,6 +1960,22 @@ def build_manifest() -> Manifest:
               [exe("test_auto_destroy"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
     sec.test("find_or_create_tag finds or creates a shared tag (Modbus)",
               [exe("test_find_or_create_tag"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
+    mb_conn_stats_tag = f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"
+    sec.test("connection statistics: traffic, times, tag count (Modbus)",
+              [exe("test_conn_stats"), "--mode=basic", mb_conn_stats_tag], F)
+    sec.test("connection statistics: requests in flight (Modbus)",
+              [exe("test_conn_stats"), "--mode=in-flight", mb_conn_stats_tag], F,
+              server=ServerSpec(exe_path=exe("modbus_server"),
+                                args_template=["--listen=127.0.0.1:{PORT}", "--listen=127.0.0.1:{PORT2}", "--delay-ms=300"],
+                                startup_wait_s=3))
+    sec.test("connection statistics: error responses (Modbus)",
+              [exe("test_conn_stats"), "--mode=errors", mb_conn_stats_tag, "--error-attrs=name=hr65530&elem_count=20"], F)
+    sec.test("connection statistics: idle disconnect and reconnect (Modbus)",
+              [exe("test_conn_stats"), "--mode=idle", mb_conn_stats_tag], T)
+    sec.test("connection statistics: failed connects and retry wait (Modbus)",
+              [exe("test_conn_stats"), "--mode=dead",
+               "--conn-tag=protocol=modbus-tcp&gateway=127.0.0.1:{PORT}&path=0&name=@connection"],
+              T, server=None, ports_needed=1)
     sec.test("auto-destroy does not reconnect an idle connection (Modbus)",
               [exe("test_auto_destroy"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                f"--conn-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection"], T)

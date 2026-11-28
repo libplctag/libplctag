@@ -38,6 +38,7 @@
 
 #    include <libplctag/protocols/ab/ab_common.h>
 #    include <libplctag/protocols/ab/defs.h>
+#    include <libplctag/lib/conn_stats.h>
 #    include <utils/atomic_utils.h>
 #    include <utils/rc.h>
 #    include <utils/vector.h>
@@ -185,6 +186,16 @@ struct cip_conn_t {
 
     /* connection inactivity timeout - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
+
+    /* statistics read by @connection tags; the handler thread writes them. */
+    conn_stats_t stats;
+
+    /* the open Forward Open, for @connection tags: the connection size and both connection IDs
+     * (O->T, which we send with, and T->O, which the PLC sends with).  0 while there is none.
+     * The handler thread writes them. */
+    atomic_int32_t fo_conn_size;
+    atomic_int64_t fo_conn_id_ot;
+    atomic_int64_t fo_conn_id_to;
 
     /* the packet being sent or received.  Big enough for the largest PLC type. */
     uint8_t data[SESSION_DATA_CAPACITY];

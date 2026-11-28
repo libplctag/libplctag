@@ -34,6 +34,7 @@
 /* Core runtime attribute table and the lookup behind the public attribute API. */
 
 #include <inttypes.h>
+#include <libplctag/lib/conn_stats.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/version.h>
@@ -88,6 +89,35 @@ static int32_t core_get_float32_byte_order(plc_tag_p tag, uint8_t *buffer, int32
 static int32_t core_get_float32_byte_order_size(plc_tag_p tag);
 static int32_t core_get_float64_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
 static int32_t core_get_float64_byte_order_size(plc_tag_p tag);
+
+/* connection statistics, on @connection tags. */
+static int32_t stats_get_connect_count(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_connect_failure_count(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_idle_disconnect_count(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_retry_delay_ms(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_retry_wait_left_ms(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_tag_count(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_requests_in_flight(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_response_time_us(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_response_time_avg_us(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_response_time_min_us(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_response_time_max_us(plc_tag_p tag, int32_t *result);
+static int32_t stats_get_connection_age_ms(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_connected_time_ms(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_requests_sent(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_requests_sent_since_connect(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_responses_received(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_responses_received_since_connect(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_bytes_sent(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_bytes_sent_since_connect(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_bytes_received(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_bytes_received_since_connect(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_tag_ops_completed(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_tag_ops_completed_since_connect(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_request_timeouts(plc_tag_p tag, int64_t *result);
+static int32_t stats_get_error_responses(plc_tag_p tag, int64_t *result);
+static int32_t retry_wait_left_ms(conn_stats_t *s);
+static int64_t connected_time_ms(conn_stats_t *s);
 
 static const attr_def_t *attr_table_find(const attr_def_t *table, const char *name);
 
@@ -226,6 +256,132 @@ static const attr_def_t core_attribs[] = {
      .description = "The byte order of a 64-bit float, as the comma-separated list the tag string uses.",
      .get_bytes = core_get_float64_byte_order,
      .get_bytes_size = core_get_float64_byte_order_size},
+
+    /* connection statistics: PLCTAG_ERR_UNSUPPORTED on a tag that is not an @connection tag. */
+    {.name = "connectcount",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Successful connects since the connection was created, the first included.",
+     .get_int = stats_get_connect_count},
+
+    {.name = "connectfailurecount",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Connect attempts that failed before the connection came up.",
+     .get_int = stats_get_connect_failure_count},
+
+    {.name = "idledisconnectcount",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Disconnects after connection_inactivity_timeout_ms with nothing to do.",
+     .get_int = stats_get_idle_disconnect_count},
+
+    {.name = "retrydelayms",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  The latest wait before reconnecting after an error, in milliseconds.",
+     .get_int = stats_get_retry_delay_ms},
+
+    {.name = "retrywaitleftms",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Milliseconds left before the next reconnect while waiting after an error, otherwise 0.",
+     .get_int = stats_get_retry_wait_left_ms},
+
+    {.name = "tagcount",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Tags using the connection, @connection tags included.",
+     .get_int = stats_get_tag_count},
+
+    {.name = "requestsinflight",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Requests sent and not yet answered.",
+     .get_int = stats_get_requests_in_flight},
+
+    {.name = "responsetimeus",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  The latest request's round trip, in microseconds.",
+     .get_int = stats_get_response_time_us},
+
+    {.name = "responsetimeavgus",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Average round trip since the latest connect in microseconds, weighting each new request 1/8.",
+     .get_int = stats_get_response_time_avg_us},
+
+    {.name = "responsetimeminus",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Shortest round trip since the latest connect, in microseconds.",
+     .get_int = stats_get_response_time_min_us},
+
+    {.name = "responsetimemaxus",
+     .type = ATTR_TYPE_INT,
+     .description = "@connection only.  Longest round trip since the latest connect, in microseconds.",
+     .get_int = stats_get_response_time_max_us},
+
+    {.name = "connectionagems",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Milliseconds since the connection was created.",
+     .get_int64 = stats_get_connection_age_ms},
+
+    {.name = "connectedtimems",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Milliseconds since the latest connect, 0 while not connected.",
+     .get_int64 = stats_get_connected_time_ms},
+
+    {.name = "requestssent",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Packets sent since the connection was created.  A packed request counts once.",
+     .get_int64 = stats_get_requests_sent},
+
+    {.name = "requestssentsinceconnect",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Packets sent since the latest connect.",
+     .get_int64 = stats_get_requests_sent_since_connect},
+
+    {.name = "responsesreceived",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Replies received since the connection was created.",
+     .get_int64 = stats_get_responses_received},
+
+    {.name = "responsesreceivedsinceconnect",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Replies received since the latest connect.",
+     .get_int64 = stats_get_responses_received_since_connect},
+
+    {.name = "bytessent",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Bytes written to the socket since the connection was created.",
+     .get_int64 = stats_get_bytes_sent},
+
+    {.name = "bytessentsinceconnect",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Bytes written to the socket since the latest connect.",
+     .get_int64 = stats_get_bytes_sent_since_connect},
+
+    {.name = "bytesreceived",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Bytes read from the socket since the connection was created.",
+     .get_int64 = stats_get_bytes_received},
+
+    {.name = "bytesreceivedsinceconnect",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Bytes read from the socket since the latest connect.",
+     .get_int64 = stats_get_bytes_received_since_connect},
+
+    {.name = "tagopscompleted",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Tag reads and writes completed; each tag in a packed request counts.",
+     .get_int64 = stats_get_tag_ops_completed},
+
+    {.name = "tagopscompletedsinceconnect",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Tag reads and writes completed since the latest connect.",
+     .get_int64 = stats_get_tag_ops_completed_since_connect},
+
+    {.name = "requesttimeouts",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Requests that got no reply in time.",
+     .get_int64 = stats_get_request_timeouts},
+
+    {.name = "errorresponses",
+     .type = ATTR_TYPE_INT64,
+     .description = "@connection only.  Replies with a CIP or Modbus error status.",
+     .get_int64 = stats_get_error_responses},
 
     {.name = NULL},
 };
@@ -745,4 +901,295 @@ static int32_t core_get_float64_byte_order_size(plc_tag_p tag) {
     if(!tag->byte_order) { return PLCTAG_ERR_UNSUPPORTED; }
 
     return attr_byte_order_size(&tag->byte_order->float64_order[0], 8);
+}
+
+
+/* time left of the wait before reconnecting; 0 when not waiting. */
+static int32_t retry_wait_left_ms(conn_stats_t *s) {
+    int64_t retry_at = atomic_get_int64(&s->next_retry_at_ms);
+    int64_t left = (retry_at == 0) ? 0 : retry_at - time_ms();
+
+    return (int32_t)((left < 0) ? 0 : left);
+}
+
+
+static int64_t connected_time_ms(conn_stats_t *s) {
+    int64_t connected_at = atomic_get_int64(&s->connected_at_ms);
+
+    return (connected_at == 0) ? 0 : time_ms() - connected_at;
+}
+
+
+static int32_t stats_get_connect_count(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->connect_count);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_connect_failure_count(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->connect_failure_count);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_idle_disconnect_count(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->idle_disconnect_count);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_retry_delay_ms(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->retry_delay_ms);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_retry_wait_left_ms(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = retry_wait_left_ms(s);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_tag_count(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->tag_count);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_requests_in_flight(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->requests_in_flight);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_response_time_us(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->response_us_last);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_response_time_avg_us(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->response_us_avg);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_response_time_min_us(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->response_us_min);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_response_time_max_us(plc_tag_p tag, int32_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int32(&s->response_us_max);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_connection_age_ms(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = time_ms() - atomic_get_int64(&s->created_ms);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_connected_time_ms(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = connected_time_ms(s);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_requests_sent(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int64(&s->requests_sent);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_requests_sent_since_connect(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = conn_stats_since_connect(&s->requests_sent, &s->requests_sent_at_connect);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_responses_received(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int64(&s->responses_received);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_responses_received_since_connect(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = conn_stats_since_connect(&s->responses_received, &s->responses_received_at_connect);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_bytes_sent(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int64(&s->bytes_sent);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_bytes_sent_since_connect(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = conn_stats_since_connect(&s->bytes_sent, &s->bytes_sent_at_connect);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_bytes_received(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int64(&s->bytes_received);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_bytes_received_since_connect(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = conn_stats_since_connect(&s->bytes_received, &s->bytes_received_at_connect);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_tag_ops_completed(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int64(&s->tag_ops_completed);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_tag_ops_completed_since_connect(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = conn_stats_since_connect(&s->tag_ops_completed, &s->tag_ops_completed_at_connect);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_request_timeouts(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int64(&s->request_timeouts);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t stats_get_error_responses(plc_tag_p tag, int64_t *result) {
+    conn_stats_t *s = tag->conn_stats;
+
+    if(!s) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    *result = atomic_get_int64(&s->error_responses);
+
+    return PLCTAG_STATUS_OK;
 }
